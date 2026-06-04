@@ -13,9 +13,15 @@ import (
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/joho/godotenv"
 	"github.com/miguel-anay/career-ops-saas/api/internal/auth"
+	"github.com/miguel-anay/career-ops-saas/api/internal/companies"
 	"github.com/miguel-anay/career-ops-saas/api/internal/config"
+	"github.com/miguel-anay/career-ops-saas/api/internal/cv"
+	"github.com/miguel-anay/career-ops-saas/api/internal/evaluate"
+	"github.com/miguel-anay/career-ops-saas/api/internal/jobs"
 	"github.com/miguel-anay/career-ops-saas/api/internal/middleware"
 	"github.com/miguel-anay/career-ops-saas/api/internal/platform"
+	"github.com/miguel-anay/career-ops-saas/api/internal/scan"
+	"github.com/miguel-anay/career-ops-saas/api/internal/tracker"
 	"github.com/miguel-anay/career-ops-saas/api/internal/ws"
 )
 
@@ -71,7 +77,7 @@ func main() {
 		r.Post("/auth/logout", authHandler.Logout)
 	})
 
-	// 7. Mount /api routes with auth + tenant middleware (handlers added in M3).
+	// 7. Mount /api routes with auth + tenant middleware.
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.Authenticator(cfg.JWTSecret))
 		r.Use(middleware.TenantIsolation(pool))
@@ -81,7 +87,30 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"status":"ok"}`))
 		})
-		// Domain routes will be mounted here in M3 (T-23..T-38).
+
+		// T-26: Jobs domain.
+		jobsHandler := jobs.NewHandler(jobs.NewService(pool))
+		jobsHandler.RegisterRoutes(r)
+
+		// T-29: Companies domain.
+		companiesHandler := companies.NewHandler(companies.NewService(pool))
+		companiesHandler.RegisterRoutes(r)
+
+		// T-32: Scan domain.
+		scanHandler := scan.NewHandler(scan.NewService(pool))
+		scanHandler.RegisterRoutes(r)
+
+		// T-35: Evaluate domain.
+		evaluateHandler := evaluate.NewHandler(evaluate.NewService(pool))
+		evaluateHandler.RegisterRoutes(r)
+
+		// T-37: CV domain.
+		cvHandler := cv.NewHandler(cv.NewService(pool), r2Client)
+		cvHandler.RegisterRoutes(r)
+
+		// T-38: Tracker domain.
+		trackerHandler := tracker.NewHandler(tracker.NewService(pool))
+		trackerHandler.RegisterRoutes(r)
 	})
 
 	// 8. WebSocket hub + listener (T-39..T-43).
