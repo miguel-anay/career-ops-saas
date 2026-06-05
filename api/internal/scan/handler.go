@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -8,16 +9,23 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/miguel-anay/career-ops-saas/api/internal/db"
 	"github.com/miguel-anay/career-ops-saas/api/internal/middleware"
 )
 
+// Servicer is the interface that handlers depend on.
+type Servicer interface {
+	TriggerScan(ctx context.Context, userID uuid.UUID) (uuid.UUID, error)
+	GetScanRun(ctx context.Context, scanRunID uuid.UUID) (*db.ScanRun, error)
+}
+
 // Handler holds dependencies for scan HTTP handlers.
 type Handler struct {
-	svc *Service
+	svc Servicer
 }
 
 // NewHandler creates a new scan Handler.
-func NewHandler(svc *Service) *Handler {
+func NewHandler(svc Servicer) *Handler {
 	return &Handler{svc: svc}
 }
 

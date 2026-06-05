@@ -1,22 +1,30 @@
 package evaluate
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/miguel-anay/career-ops-saas/api/internal/db"
 	"github.com/miguel-anay/career-ops-saas/api/internal/middleware"
 )
 
+// Servicer is the interface that handlers depend on.
+type Servicer interface {
+	EnqueueEvaluation(ctx context.Context, userID, jobID uuid.UUID) (string, error)
+	GetReport(ctx context.Context, userID, jobID uuid.UUID) (*db.Report, error)
+}
+
 // Handler holds dependencies for evaluate HTTP handlers.
 type Handler struct {
-	svc *Service
+	svc Servicer
 }
 
 // NewHandler creates a new evaluate Handler.
-func NewHandler(svc *Service) *Handler {
+func NewHandler(svc Servicer) *Handler {
 	return &Handler{svc: svc}
 }
 

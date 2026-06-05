@@ -51,6 +51,11 @@ func GetUserID(ctx context.Context) (uuid.UUID, bool) {
 	return id, ok
 }
 
+// SetUserID stores a userID in the context. Used in tests to simulate authenticated requests.
+func SetUserID(ctx context.Context, id uuid.UUID) context.Context {
+	return context.WithValue(ctx, userIDKey, id)
+}
+
 func respondUnauthorized(w http.ResponseWriter, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusUnauthorized)

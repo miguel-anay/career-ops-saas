@@ -1,6 +1,7 @@
 package tracker
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -8,16 +9,23 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/miguel-anay/career-ops-saas/api/internal/db"
 	"github.com/miguel-anay/career-ops-saas/api/internal/middleware"
 )
 
+// Servicer is the interface that handlers depend on.
+type Servicer interface {
+	ListApplications(ctx context.Context, userID uuid.UUID, page, limit int) ([]db.Application, error)
+	UpdateApplication(ctx context.Context, userID, appID uuid.UUID, status *string, notes *string) (*db.Application, error)
+}
+
 // Handler holds dependencies for tracker HTTP handlers.
 type Handler struct {
-	svc *Service
+	svc Servicer
 }
 
 // NewHandler creates a new tracker Handler.
-func NewHandler(svc *Service) *Handler {
+func NewHandler(svc Servicer) *Handler {
 	return &Handler{svc: svc}
 }
 

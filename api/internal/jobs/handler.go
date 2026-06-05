@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -8,16 +9,25 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/miguel-anay/career-ops-saas/api/internal/db"
 	"github.com/miguel-anay/career-ops-saas/api/internal/middleware"
 )
 
+// Servicer is the interface that handlers depend on.
+// The concrete *Service satisfies this automatically.
+type Servicer interface {
+	AddManual(ctx context.Context, userID uuid.UUID, rawURL string) (*db.Job, error)
+	List(ctx context.Context, userID uuid.UUID, page, limit int) ([]db.Job, error)
+	GetByID(ctx context.Context, userID uuid.UUID, jobID uuid.UUID) (*db.Job, error)
+}
+
 // Handler holds dependencies for jobs HTTP handlers.
 type Handler struct {
-	svc *Service
+	svc Servicer
 }
 
 // NewHandler creates a new jobs Handler.
-func NewHandler(svc *Service) *Handler {
+func NewHandler(svc Servicer) *Handler {
 	return &Handler{svc: svc}
 }
 

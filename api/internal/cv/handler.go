@@ -1,24 +1,35 @@
 package cv
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/miguel-anay/career-ops-saas/api/internal/db"
 	"github.com/miguel-anay/career-ops-saas/api/internal/middleware"
 	"github.com/miguel-anay/career-ops-saas/api/internal/platform"
 )
 
+// Servicer is the interface that handlers depend on.
+type Servicer interface {
+	EnqueuePDFGeneration(ctx context.Context, userID, jobID uuid.UUID) (string, error)
+	GetDownloadURL(ctx context.Context, r2 *platform.R2Client, userID, jobID uuid.UUID) (string, time.Time, error)
+	ListCVs(ctx context.Context, userID uuid.UUID) ([]db.Cv, error)
+	CreateCV(ctx context.Context, userID uuid.UUID, title, contentMd string, isMaster bool) (*db.Cv, error)
+}
+
 // Handler holds dependencies for cv HTTP handlers.
 type Handler struct {
-	svc *Service
+	svc Servicer
 	r2  *platform.R2Client
 }
 
 // NewHandler creates a new cv Handler.
-func NewHandler(svc *Service, r2 *platform.R2Client) *Handler {
+func NewHandler(svc Servicer, r2 *platform.R2Client) *Handler {
 	return &Handler{svc: svc, r2: r2}
 }
 

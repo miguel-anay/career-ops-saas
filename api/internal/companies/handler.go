@@ -1,22 +1,31 @@
 package companies
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/miguel-anay/career-ops-saas/api/internal/db"
 	"github.com/miguel-anay/career-ops-saas/api/internal/middleware"
 )
 
+// Servicer is the interface that handlers depend on.
+type Servicer interface {
+	List(ctx context.Context, userID uuid.UUID) ([]db.WatchedCompany, error)
+	Add(ctx context.Context, userID uuid.UUID, name, careersURL, providerID string) (*db.WatchedCompany, error)
+	Remove(ctx context.Context, userID uuid.UUID, companyID uuid.UUID) error
+}
+
 // Handler holds dependencies for companies HTTP handlers.
 type Handler struct {
-	svc *Service
+	svc Servicer
 }
 
 // NewHandler creates a new companies Handler.
-func NewHandler(svc *Service) *Handler {
+func NewHandler(svc Servicer) *Handler {
 	return &Handler{svc: svc}
 }
 
