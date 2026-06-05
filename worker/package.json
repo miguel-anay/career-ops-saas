@@ -1,0 +1,25 @@
+{
+  "name": "career-ops-worker",
+  "version": "1.0.0",
+  "description": "Node.js worker service — consumes pg-boss jobs, runs providers, calls Anthropic, renders PDFs",
+  "type": "module",
+  "main": "index.mjs",
+  "scripts": {
+    "start": "node index.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.52.0",
+    "@aws-sdk/client-s3": "^3.0.0",
+    "dotenv": "^16.0.0",
+    "express": "^4.0.0",
+    "pg": "^8.0.0",
+    "pg-boss": "^10.0.0"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^2.0.0",
+    "vitest": "^2.0.0"
+  }
+}
