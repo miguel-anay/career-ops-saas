@@ -17,3 +17,10 @@ SELECT * FROM usage
 WHERE user_id = $1
   AND month   = $2
 LIMIT 1;
+
+-- name: UpsertIncrementIngestions :one
+INSERT INTO usage (user_id, month, ingestions_count)
+VALUES ($1, $2, 1)
+ON CONFLICT (user_id, month) DO UPDATE
+  SET ingestions_count = usage.ingestions_count + 1
+RETURNING *;
