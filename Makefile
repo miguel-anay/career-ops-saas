@@ -20,7 +20,7 @@ test-rls:
 	docker compose exec -T postgres psql -U careerops -d careerops -f /docker-entrypoint-initdb.d/001_initial.sql 2>/dev/null || true
 	docker compose exec -T postgres psql -U careerops -d careerops -f /docker-entrypoint-initdb.d/002_ingest_cv.sql 2>/dev/null || true
 	docker compose exec -T postgres psql -U careerops -d careerops -c "CREATE EXTENSION IF NOT EXISTS pgtap;" 2>/dev/null || true
-	docker compose exec -T postgres pg_prove -U careerops -d careerops /db/tests/rls_test.sql
+	docker compose exec -T -e PGPASSWORD=app_pw postgres pg_prove -U app_user -d careerops /db/tests/rls_test.sql
 	docker compose exec -T -e PGPASSWORD=app_pw postgres pg_prove -U app_user -d careerops /db/tests/cv_ingestions_rls.test.sql
 	docker compose stop postgres
 
