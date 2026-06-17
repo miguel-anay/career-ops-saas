@@ -101,8 +101,8 @@ func (h *Handler) GoogleCallback(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 	})
 
-	// Redirect to frontend with access token in query param.
-	redirectURL := fmt.Sprintf("%s/auth/callback?access_token=%s", h.cfg.WebOrigin, accessToken)
+	// Redirect to frontend with both tokens in query params.
+	redirectURL := fmt.Sprintf("%s/auth/callback?access_token=%s&refresh_token=%s", h.cfg.WebOrigin, accessToken, refreshToken)
 	http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
 }
 
