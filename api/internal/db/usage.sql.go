@@ -12,7 +12,7 @@ import (
 )
 
 const getUsageByUserMonth = `-- name: GetUsageByUserMonth :one
-SELECT id, user_id, month, evaluations_count, pdfs_count FROM usage
+SELECT id, user_id, month, evaluations_count, pdfs_count, ingestions_count FROM usage
 WHERE user_id = $1
   AND month   = $2
 LIMIT 1
@@ -32,6 +32,7 @@ func (q *Queries) GetUsageByUserMonth(ctx context.Context, arg GetUsageByUserMon
 		&i.Month,
 		&i.EvaluationsCount,
 		&i.PdfsCount,
+		&i.IngestionsCount,
 	)
 	return i, err
 }
@@ -41,7 +42,7 @@ INSERT INTO usage (user_id, month, evaluations_count)
 VALUES ($1, $2, 1)
 ON CONFLICT (user_id, month) DO UPDATE
   SET evaluations_count = usage.evaluations_count + 1
-RETURNING id, user_id, month, evaluations_count, pdfs_count
+RETURNING id, user_id, month, evaluations_count, pdfs_count, ingestions_count
 `
 
 type UpsertIncrementEvaluationsParams struct {
@@ -58,6 +59,34 @@ func (q *Queries) UpsertIncrementEvaluations(ctx context.Context, arg UpsertIncr
 		&i.Month,
 		&i.EvaluationsCount,
 		&i.PdfsCount,
+		&i.IngestionsCount,
+	)
+	return i, err
+}
+
+const upsertIncrementIngestions = `-- name: UpsertIncrementIngestions :one
+INSERT INTO usage (user_id, month, ingestions_count)
+VALUES ($1, $2, 1)
+ON CONFLICT (user_id, month) DO UPDATE
+  SET ingestions_count = usage.ingestions_count + 1
+RETURNING id, user_id, month, evaluations_count, pdfs_count, ingestions_count
+`
+
+type UpsertIncrementIngestionsParams struct {
+	UserID uuid.UUID `json:"user_id"`
+	Month  string    `json:"month"`
+}
+
+func (q *Queries) UpsertIncrementIngestions(ctx context.Context, arg UpsertIncrementIngestionsParams) (Usage, error) {
+	row := q.db.QueryRowContext(ctx, upsertIncrementIngestions, arg.UserID, arg.Month)
+	var i Usage
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Month,
+		&i.EvaluationsCount,
+		&i.PdfsCount,
+		&i.IngestionsCount,
 	)
 	return i, err
 }
@@ -67,7 +96,7 @@ INSERT INTO usage (user_id, month, pdfs_count)
 VALUES ($1, $2, 1)
 ON CONFLICT (user_id, month) DO UPDATE
   SET pdfs_count = usage.pdfs_count + 1
-RETURNING id, user_id, month, evaluations_count, pdfs_count
+RETURNING id, user_id, month, evaluations_count, pdfs_count, ingestions_count
 `
 
 type UpsertIncrementPDFsParams struct {
@@ -84,6 +113,7 @@ func (q *Queries) UpsertIncrementPDFs(ctx context.Context, arg UpsertIncrementPD
 		&i.Month,
 		&i.EvaluationsCount,
 		&i.PdfsCount,
+		&i.IngestionsCount,
 	)
 	return i, err
 }
