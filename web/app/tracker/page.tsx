@@ -48,11 +48,6 @@ export default function TrackerPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [editingNotes, setEditingNotes] = useState<Record<string, string>>({})
 
-  if (!isAuthenticated()) {
-    router.replace('/login')
-    return null
-  }
-
   const loadApplications = useCallback(async (p = 1) => {
     setIsLoading(true)
     try {
@@ -68,8 +63,12 @@ export default function TrackerPage() {
   }, [])
 
   useEffect(() => {
+    if (!isAuthenticated()) {
+      router.replace('/login')
+      return
+    }
     loadApplications()
-  }, [loadApplications])
+  }, [loadApplications, router])
 
   const handleStatusChange = async (id: string, newStatus: string) => {
     try {

@@ -57,7 +57,12 @@ services:
     shm_size: "1gb"
 
   web:
-    build: ./web
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev"
+    volumes:
+      - ./web:/app
+      - /app/node_modules
     depends_on:
       - api
     environment:

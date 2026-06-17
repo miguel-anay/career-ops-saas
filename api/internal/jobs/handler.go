@@ -57,6 +57,9 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list jobs", "internal_error")
 		return
 	}
+	if jobList == nil {
+		jobList = []db.Job{}
+	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"jobs":  jobList,

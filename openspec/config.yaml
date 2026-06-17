@@ -1,0 +1,66 @@
+project: career-ops-saas
+description: >
+  Multi-tenant SaaS for AI-assisted job search. Three-service monorepo (Go API
+  control plane, Node.js worker data plane, Next.js web) backed by a single
+  PostgreSQL 16 instance with FORCE ROW LEVEL SECURITY. Users authenticate with
+  Google OAuth, scan ATS providers for openings, evaluate fit with Anthropic,
+  generate tailored CV PDFs, and track applications.
+artifact_store: openspec
+working_directory: /home/k3n5h1n/Escritorio/career-saas/career-ops-saas
+initialized_at: "2026-06-17"
+
+# Actual implemented stack (not "planned" — these are live)
+stack:
+  api:
+    language: Go 1.25
+    module: github.com/miguel-anay/career-ops-saas/api
+    router: chi/v5
+    protocol: REST + WebSocket
+    pattern: hexagonal per domain (handler.go Servicer iface + service.go + repo.go)
+    query_layer: sqlc (output api/internal/db, DO NOT EDIT)
+    auth: Google OAuth2 + JWT (HS256, 1h access / 7d refresh w/ rotation)
+  worker:
+    language: Node.js ESM (*.mjs)
+    queue: pg-boss
+    job_types:
+      - scan-company   # jobs/scan.mjs — ATS scraping, NO Anthropic
+      - evaluate-job   # jobs/evaluate.mjs — Anthropic eval
+      - generate-pdf   # jobs/pdf.mjs — Playwright render
+    ai: Anthropic (claude-sonnet-4-6, max_tokens 8000, temp 0.2, prompt caching)
+    constraint: worker NEVER handles auth/routing; only worker holds ANTHROPIC_API_KEY
+  web:
+    framework: Next.js 14 (App Router)
+    testing: vitest + @testing-library/react
+    constraint: talks only to Go API over HTTP + WebSocket
+  database:
+    engine: PostgreSQL 16
+    isolation: row-level — Postgres RLS via SET LOCAL app.current_user_id
+    schema: db/schema.sql (8 tables, FORCE ROW LEVEL SECURITY)
+  storage: Cloudflare R2 (ADR-5, zero egress, S3-compatible)
+
+# Hard architectural invariants (from CLAUDE.md)
+invariants:
+  - Go API NEVER scrapes, NEVER calls Anthropic, NEVER launches Chromium
+  - Node worker NEVER handles auth or routing
+  - Every worker DB write goes through tenantQuery(userId, sql, params)
+  - API and worker never talk directly — pg-boss (queue) + LISTEN/NOTIFY (events) over Postgres
+
+testing:
+  strict_tdd: true
+  test_command: make test-all
+  runners:
+    go: cd api && go test ./... -count=1
+    worker: cd worker && npm test          # vitest
+    web: cd web && npm test -- --run        # vitest
+    rls: make test-rls                       # pgTAP, requires Docker
+
+conventions:
+  commits: conventional commits (no AI attribution)
+  multi_tenancy: row-level (RLS, app.current_user_id per transaction)
+  error_handling: explicit Go error returns, no panics in handlers
+  api_style: REST/JSON
+
+delivery:
+  strategy: ask-on-risk
+  execution_mode: interactive
+  chain_strategy: stacked-to-main   # chosen for ingest-cv: each seam independently mergeable

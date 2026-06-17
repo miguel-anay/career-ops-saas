@@ -5,7 +5,7 @@ import { handleScanCompany } from './jobs/scan.mjs'
 import { handleEvaluateJob } from './jobs/evaluate.mjs'
 import { handleGeneratePDF } from './jobs/pdf.mjs'
 
-const PORT = process.env.WORKER_PORT || 3001
+const PORT = process.env.WORKER_PORT || 3002
 
 async function main() {
   console.log('[worker] Starting...')

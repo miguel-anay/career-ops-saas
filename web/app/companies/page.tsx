@@ -64,16 +64,11 @@ export default function CompaniesPage() {
   const [newProviderId, setNewProviderId] = useState('')
   const [isAdding, setIsAdding] = useState(false)
 
-  if (!isAuthenticated()) {
-    router.replace('/login')
-    return null
-  }
-
   const loadCompanies = useCallback(async () => {
     setIsLoading(true)
     try {
       const data = await apiGet<CompaniesResponse>('/api/companies')
-      setCompanies(data.companies)
+      setCompanies(data.companies ?? [])
     } catch {
       toast.error('Failed to load companies')
     } finally {
@@ -82,8 +77,12 @@ export default function CompaniesPage() {
   }, [])
 
   useEffect(() => {
+    if (!isAuthenticated()) {
+      router.replace('/login')
+      return
+    }
     loadCompanies()
-  }, [loadCompanies])
+  }, [loadCompanies, router])
 
   const handleAddCompany = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -143,7 +142,7 @@ export default function CompaniesPage() {
           onChange={e => setNewCareersUrl(e.target.value)}
           className="flex-1 min-w-[200px]"
         />
-        <Select value={newProviderId} onValueChange={setNewProviderId}>
+        <Select value={newProviderId} onValueChange={(v) => setNewProviderId(v ?? '')}>
           <SelectTrigger className="w-48">
             <SelectValue placeholder="Provider" />
           </SelectTrigger>
