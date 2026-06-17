@@ -35,3 +35,10 @@ Thumbs.db
 *.tmp
 coverage/
 .nyc_output/
+
+# Test artifacts
+web/test-results/
+playwright-report/
+
+# Local tooling cache (skill registry)
+.atl/
