@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
-import { redirect } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -48,6 +48,7 @@ function formatDate(iso: string): string {
 }
 
 export default function DashboardPage() {
+  const router = useRouter()
   const [jobs, setJobs] = useState<Job[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -58,16 +59,12 @@ export default function DashboardPage() {
 
   const { events, status: scanStatus, connect, reset } = useScanProgress()
 
-  if (!isAuthenticated()) {
-    redirect('/login')
-  }
-
   const loadJobs = useCallback(async (p = 1) => {
     setIsLoading(true)
     try {
       const data = await apiGet<JobsResponse>(`/api/jobs?page=${p}&limit=20`)
-      setJobs(data.jobs)
-      setTotal(data.total)
+      setJobs(data.jobs ?? [])
+      setTotal(data.total ?? 0)
       setPage(p)
     } catch {
       toast.error('Failed to load jobs')
@@ -77,8 +74,12 @@ export default function DashboardPage() {
   }, [])
 
   useEffect(() => {
+    if (!isAuthenticated()) {
+      router.replace('/login')
+      return
+    }
     loadJobs()
-  }, [loadJobs])
+  }, [loadJobs, router])
 
   // Handle scan WebSocket events
   useEffect(() => {
@@ -94,7 +95,7 @@ export default function DashboardPage() {
       const d = lastEvent.data as { company: string; error: string }
       toast.error(`Failed to scan ${d.company}: ${d.error}`)
     } else if (lastEvent.event === 'scan.job_found') {
-      const d = lastEvent.data as Job & { is_new: boolean }
+      const d = lastEvent.data as unknown as Job & { is_new: boolean }
       if (d.is_new) {
         setJobs(prev => {
           const exists = prev.some(j => j.id === d.id)

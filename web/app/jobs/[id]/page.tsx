@@ -68,12 +68,11 @@ export default function JobDetailPage() {
   const [isGeneratingCV, setIsGeneratingCV] = useState(false)
   const [expandedBlocks, setExpandedBlocks] = useState<Set<string>>(new Set())
 
-  if (!isAuthenticated()) {
-    router.replace('/login')
-    return null
-  }
-
   useEffect(() => {
+    if (!isAuthenticated()) {
+      router.replace('/login')
+      return
+    }
     async function loadData() {
       setIsLoading(true)
       try {

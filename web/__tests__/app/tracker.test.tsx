@@ -1,26 +1,32 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { render, screen, waitFor, cleanup, fireEvent } from '@testing-library/react'
 import React from 'react'
+import TrackerPage from '../../app/tracker/page'
 
-// Mock next/navigation
+const { mockApiGet, mockApiPatch, mockRouter } = vi.hoisted(() => ({
+  mockApiGet: vi.fn(),
+  mockApiPatch: vi.fn(),
+  // Stable reference: returning a new object each call makes useEffect re-run
+  // on every render (router dep changes), causing a second loadApplications call
+  // that detaches DOM elements before fireEvent can act on them.
+  mockRouter: { push: vi.fn(), replace: vi.fn() },
+}))
+
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useRouter: () => mockRouter,
   redirect: vi.fn(),
 }))
 
-// Mock the api module
 vi.mock('../../lib/api', () => ({
-  apiGet: vi.fn(),
-  apiPatch: vi.fn(),
+  apiGet: mockApiGet,
+  apiPatch: mockApiPatch,
 }))
 
-// Mock auth
 vi.mock('../../lib/auth', () => ({
-  isAuthenticated: vi.fn(() => true),
-  getAccessToken: vi.fn(() => 'test-token'),
+  isAuthenticated: () => true,
+  getAccessToken: () => 'test-token',
 }))
 
-// Mock sonner
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
   Toaster: () => null,
@@ -54,20 +60,16 @@ const mockApplications = [
 
 describe('Tracker page (app/tracker/page.tsx)', () => {
   beforeEach(() => {
+    cleanup()
     localStorageMock.clear()
     localStorageMock.setItem('access_token', 'test-token')
-    vi.clearAllMocks()
-  })
-
-  afterEach(() => {
-    vi.restoreAllMocks()
+    mockApiGet.mockReset()
+    mockApiPatch.mockReset()
   })
 
   it('renders applications table with data', async () => {
-    const { apiGet } = await import('../../lib/api')
-    vi.mocked(apiGet).mockResolvedValueOnce({ applications: mockApplications, total: 1 })
+    mockApiGet.mockResolvedValueOnce({ applications: mockApplications, total: 1 })
 
-    const { default: TrackerPage } = await import('../../app/tracker/page')
     render(<TrackerPage />)
 
     await waitFor(() => {
@@ -77,23 +79,22 @@ describe('Tracker page (app/tracker/page.tsx)', () => {
   })
 
   it('status select calls apiPatch on change', async () => {
-    const { apiGet, apiPatch } = await import('../../lib/api')
-    vi.mocked(apiGet).mockResolvedValueOnce({ applications: mockApplications, total: 1 })
-    vi.mocked(apiPatch).mockResolvedValueOnce({ ...mockApplications[0], status: 'Applied' })
+    mockApiGet.mockResolvedValueOnce({ applications: mockApplications, total: 1 })
+    mockApiPatch.mockResolvedValueOnce({ ...mockApplications[0], status: 'Applied' })
 
-    const { default: TrackerPage } = await import('../../app/tracker/page')
-    render(<TrackerPage />)
+    const { container } = render(<TrackerPage />)
 
+    let statusSelect: HTMLSelectElement | null = null
     await waitFor(() => {
       expect(screen.getByText('Acme Corp')).toBeTruthy()
+      statusSelect = container.querySelector('select')
+      expect(statusSelect).toBeTruthy()
     })
 
-    // Find status select and trigger change
-    const statusSelect = screen.getByDisplayValue('Evaluated')
-    fireEvent.change(statusSelect, { target: { value: 'Applied' } })
+    fireEvent.change(statusSelect!, { target: { value: 'Applied' } })
 
     await waitFor(() => {
-      expect(apiPatch).toHaveBeenCalledWith('/api/applications/app-1', { status: 'Applied' })
+      expect(mockApiPatch).toHaveBeenCalledWith('/api/applications/app-1', { status: 'Applied' })
     })
   })
 })

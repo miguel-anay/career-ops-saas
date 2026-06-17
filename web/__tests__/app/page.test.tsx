@@ -1,26 +1,30 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react'
 import React from 'react'
+import DashboardPage from '../../app/page'
 
-// Mock next/navigation
+const { mockApiGet, mockApiPost, mockIsAuthenticated, mockRouter } = vi.hoisted(() => ({
+  mockApiGet: vi.fn(),
+  mockApiPost: vi.fn(),
+  mockIsAuthenticated: vi.fn(() => true),
+  mockRouter: { push: vi.fn(), replace: vi.fn() },
+}))
+
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useRouter: () => mockRouter,
   redirect: vi.fn(),
 }))
 
-// Mock the api module
 vi.mock('../../lib/api', () => ({
-  apiGet: vi.fn(),
-  apiPost: vi.fn(),
+  apiGet: mockApiGet,
+  apiPost: mockApiPost,
 }))
 
-// Mock the auth module
 vi.mock('../../lib/auth', () => ({
-  isAuthenticated: vi.fn(),
-  getAccessToken: vi.fn(() => 'test-token'),
+  isAuthenticated: mockIsAuthenticated,
+  getAccessToken: () => 'test-token',
 }))
 
-// Mock useScanProgress hook
 vi.mock('../../hooks/useScanProgress', () => ({
   useScanProgress: () => ({
     events: [],
@@ -32,7 +36,6 @@ vi.mock('../../hooks/useScanProgress', () => ({
   }),
 }))
 
-// Mock sonner
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
   Toaster: () => null,
@@ -52,20 +55,19 @@ Object.defineProperty(global, 'localStorage', { value: localStorageMock, writabl
 
 describe('Dashboard page (app/page.tsx)', () => {
   beforeEach(() => {
+    cleanup()
     localStorageMock.clear()
     localStorageMock.setItem('access_token', 'test-token')
-    vi.clearAllMocks()
-  })
-
-  afterEach(() => {
-    vi.restoreAllMocks()
+    mockApiGet.mockReset()
+    mockApiPost.mockReset()
+    mockIsAuthenticated.mockReset()
+    mockIsAuthenticated.mockReturnValue(true)
+    mockRouter.push.mockReset()
+    mockRouter.replace.mockReset()
   })
 
   it('renders job list when authenticated', async () => {
-    const { isAuthenticated } = await import('../../lib/auth')
-    const { apiGet } = await import('../../lib/api')
-    vi.mocked(isAuthenticated).mockReturnValue(true)
-    vi.mocked(apiGet).mockResolvedValueOnce({
+    mockApiGet.mockResolvedValueOnce({
       jobs: [
         { id: '1', title: 'Software Engineer', company: 'Acme', status: 'pending', received_at: '2026-06-01T00:00:00Z', platform: 'greenhouse' },
       ],
@@ -73,7 +75,6 @@ describe('Dashboard page (app/page.tsx)', () => {
       page: 1,
     })
 
-    const { default: DashboardPage } = await import('../../app/page')
     render(<DashboardPage />)
 
     await waitFor(() => {
@@ -82,36 +83,29 @@ describe('Dashboard page (app/page.tsx)', () => {
   })
 
   it('"Add Job URL" form calls apiPost on submit', async () => {
-    const { isAuthenticated } = await import('../../lib/auth')
-    const { apiGet, apiPost } = await import('../../lib/api')
-    vi.mocked(isAuthenticated).mockReturnValue(true)
-    vi.mocked(apiGet).mockResolvedValue({ jobs: [], total: 0, page: 1 })
-    vi.mocked(apiPost).mockResolvedValueOnce({ id: '2', url: 'http://example.com', status: 'pending', platform: 'ashby' })
+    mockApiGet.mockResolvedValue({ jobs: [], total: 0, page: 1 })
+    mockApiPost.mockResolvedValueOnce({ id: '2', url: 'http://example.com', status: 'pending', platform: 'ashby' })
 
-    const { default: DashboardPage } = await import('../../app/page')
     render(<DashboardPage />)
 
     const input = await screen.findByPlaceholderText(/job url/i)
-    const button = screen.getByRole('button', { name: /add/i })
+    const button = screen.getByRole('button', { name: /^add$/i })
 
     fireEvent.change(input, { target: { value: 'http://example.com/job' } })
     fireEvent.click(button)
 
     await waitFor(() => {
-      expect(apiPost).toHaveBeenCalledWith('/api/jobs', { url: 'http://example.com/job' })
+      expect(mockApiPost).toHaveBeenCalledWith('/api/jobs', { url: 'http://example.com/job' })
     })
   })
 
   it('redirects to /login when not authenticated', async () => {
-    const { isAuthenticated } = await import('../../lib/auth')
-    const { redirect } = await import('next/navigation')
-    vi.mocked(isAuthenticated).mockReturnValue(false)
+    mockIsAuthenticated.mockReturnValue(false)
 
-    const { default: DashboardPage } = await import('../../app/page')
     render(<DashboardPage />)
 
     await waitFor(() => {
-      expect(redirect).toHaveBeenCalledWith('/login')
+      expect(mockRouter.replace).toHaveBeenCalledWith('/login')
     })
   })
 })
