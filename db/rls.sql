@@ -15,6 +15,7 @@ ALTER TABLE reports           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cvs               ENABLE ROW LEVEL SECURITY;
 ALTER TABLE scan_runs         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE usage             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cv_ingestions     ENABLE ROW LEVEL SECURITY;
 
 -- Force RLS even for the table owner role (app_user)
 ALTER TABLE users             FORCE ROW LEVEL SECURITY;
@@ -25,6 +26,7 @@ ALTER TABLE reports           FORCE ROW LEVEL SECURITY;
 ALTER TABLE cvs               FORCE ROW LEVEL SECURITY;
 ALTER TABLE scan_runs         FORCE ROW LEVEL SECURITY;
 ALTER TABLE usage             FORCE ROW LEVEL SECURITY;
+ALTER TABLE cv_ingestions     FORCE ROW LEVEL SECURITY;
 
 -- ---------------------------------------------------------------------------
 -- Tenant policies
@@ -59,5 +61,9 @@ CREATE POLICY tenant_scan_runs ON scan_runs
   WITH CHECK (user_id = current_setting('app.current_user_id', true)::uuid);
 
 CREATE POLICY tenant_usage ON usage
+  USING (user_id = current_setting('app.current_user_id', true)::uuid)
+  WITH CHECK (user_id = current_setting('app.current_user_id', true)::uuid);
+
+CREATE POLICY tenant_cv_ingestions ON cv_ingestions
   USING (user_id = current_setting('app.current_user_id', true)::uuid)
   WITH CHECK (user_id = current_setting('app.current_user_id', true)::uuid);
