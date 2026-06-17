@@ -1,8 +1,9 @@
 # Apply Progress — `ingest-cv`
 
-> Batch: 1 (Seam A only — DB schema + migration + sqlc)
+> Batch: 1 (Seam A only — DB schema + migration + sqlc) + Batch 2 (T-83/T-84 close-out + legacy RLS fix)
 > Branch: `feat/ingest-cv-db`
 > Strict TDD: active (RED -> GREEN per task, sequential T-79 -> T-84)
+> Seam A status: **COMPLETE**. Do not start Seam B/C/D/E from this record without a fresh tasks read.
 
 ## Task status
 
@@ -12,8 +13,66 @@
 | T-80 | `db/migrations/002_ingest_cv.sql` — `cv_ingestions` table + RLS + `usage.ingestions_count` | done | `274ba2c` |
 | T-81 | Mirror DDL into `db/schema.sql` + `db/rls.sql` | done | `b60cff5` |
 | T-82 | sqlc queries: `cv_ingestions.sql` (Insert/Get/UpdateStatus) + `usage.sql` (`UpsertIncrementIngestions`) | done | `f90d415` |
-| T-83 | Regenerate sqlc Go types (`CvIngestion` struct, query methods, `Usage.IngestionsCount`) | **blocked** | n/a — see Blockers |
-| T-84 | Run `make test-rls`, confirm T-79 passes against the live migration | **partial** | n/a — see Deviations |
+| T-83 | Regenerate sqlc Go types (`CvIngestion` struct, query methods, `Usage.IngestionsCount`) | **done** | `614b61d` |
+| T-84 | Run `make test-rls`, confirm T-79 passes against the live migration | **done** | n/a (verification only) — see Batch 2 below |
+| — | Fix legacy `db/tests/rls_test.sql` false-positive (user-approved, folded into Seam A) | **done** | `876643e` |
+
+## Batch 2 — close-out (this session)
+
+**Unblocked T-83**: the `api/internal/db/` file ownership issue from Batch 1 was resolved externally (files are
+now `k3n5h1n:k3n5h1n`, writable). Ran `sqlc generate` from `db/` with the same binary
+(`/home/k3n5h1n/gopath/bin/sqlc`, v1.31.1) used in Batch 1. Clean exit, no errors. Generated:
+- `api/internal/db/cv_ingestions.sql.go` (new) — `CvIngestion` struct usage via `GetCVIngestion`,
+  `InsertCVIngestion`, `UpdateCVIngestionStatus` (+ `UpdateCVIngestionStatusParams`).
+- `api/internal/db/models.go` (modified) — added `CvIngestion` struct, added `Usage.IngestionsCount` field.
+- `api/internal/db/usage.sql.go` (modified) — `UpsertIncrementIngestions` + `UpsertIncrementIngestionsParams`,
+  and the `IngestionsCount` field threaded through all three existing `usage` query scans.
+
+Verified `cd api && go build ./...` (clean) and `go test ./... -count=1` (all packages pass, no regressions).
+Committed as `614b61d` — `chore(db): regenerate sqlc types for cv_ingestions`.
+
+**Fixed the legacy `db/tests/rls_test.sql` false positive** (user-approved scope addition, still Seam A —
+this is the DB/RLS layer, not Seam B/C/D/E):
+- Root cause #1: ran as `careerops` (the `POSTGRES_USER`, a Postgres superuser). Superusers bypass RLS
+  unconditionally regardless of `FORCE ROW LEVEL SECURITY` — every cross-tenant assertion in the file was a
+  false positive that happened to read `0` rows by coincidence of context, not because RLS was enforced.
+- Root cause #2: asserted on `pg_class.rowsecurity`, which does not exist on PostgreSQL 16 (correct column:
+  `relrowsecurity`). This made the file fail outright (24/24 subtests) before it could even reach the
+  superuser-bypass problem.
+- Root cause #3 (discovered while fixing, not previously documented): `plan(24)` undercounted — the file has
+  always contained 25 `ok()`/`is()` assertions, not 24. This was masked previously because execution died on
+  assertion #1 before the plan-mismatch could surface. Fixed to `plan(25)`.
+- Fix applied: seed both tenant users via `auth_upsert_user` (SECURITY DEFINER, bypasses RLS for setup exactly
+  as production OAuth signup does) instead of a direct `INSERT INTO users` with hardcoded UUIDs — a direct
+  insert for "user B" while `app.current_user_id` is set to user A would violate the `tenant_users` `WITH CHECK`
+  policy under `app_user`. Captured the generated UUIDs via `set_config('test.user_a'/'test.user_b', ..., false)`
+  and used them as FKs for all other seeded rows (watched_companies, jobs, applications, reports, cvs,
+  scan_runs, usage — those tables' own PKs stay as the original hardcoded literals, only the `user_id` FK
+  changed). Switched every `pg_class` assertion from `rowsecurity` to `relrowsecurity`. Switched the
+  `SET app.current_user_id = '...'` literal-role-switch lines to `set_config` calls (wrapped in `DO $$ BEGIN
+  PERFORM ... END $$;` to avoid emitting a spurious extra TAP line — a bare top-level `SELECT set_config(...)`
+  is counted by pg_prove/psql's TAP harness as its own subtest result line).
+- Verified RED first: ran the unmodified file as `careerops` — confirmed `Failed 24/24 subtests`,
+  `ERROR: column "rowsecurity" does not exist`. This is the evidence the test was broken.
+- Verified GREEN after: ran as `app_user` — `Tests=25 ... Result: PASS`, all genuine RLS assertions.
+- Updated `Makefile`'s `test-rls` target: `rls_test.sql` now runs via the same `app_user`/`PGPASSWORD=app_pw`
+  `pg_prove` invocation pattern as `cv_ingestions_rls.test.sql` (was `-U careerops`).
+- Committed as `876643e` — `fix(db): run legacy RLS pgTAP test as app_user and use relrowsecurity`.
+
+**Final verification — full `make test-rls` target, clean run from a stopped container:**
+```
+docker compose exec ... pg_prove -U app_user -d careerops /db/tests/rls_test.sql
+  /db/tests/rls_test.sql .. ok
+  All tests successful.
+  Files=1, Tests=25,  Result: PASS
+
+docker compose exec ... pg_prove -U app_user -d careerops /db/tests/cv_ingestions_rls.test.sql
+  /db/tests/cv_ingestions_rls.test.sql .. ok
+  All tests successful.
+  Files=1, Tests=4,  Result: PASS
+```
+Target exits 0 end-to-end (no longer halts on the legacy file). `make test-go` also reconfirmed green after the
+sqlc regeneration (11 Go packages, all `ok` or no-test-files, zero failures).
 
 ## Deviations from the plan
 
@@ -44,80 +103,43 @@
      out of scope to redesign), and the new `cv_ingestions_rls.test.sql` runs as `app_user` via a second
      `pg_prove` call with `PGPASSWORD=app_pw`.
 
-## Blockers
+## Blockers (Batch 1) — both resolved in Batch 2
 
-### T-83 — sqlc Go code generation blocked by file ownership
+### T-83 — sqlc Go code generation blocked by file ownership — RESOLVED
 
-`sqlc generate` (v1.31.1, found at `/home/k3n5h1n/gopath/bin/sqlc`) runs successfully and **does** parse the new
-queries correctly — it generated a correct `cv_ingestions.sql.go` on the first attempt (proven by inspection, then
-removed to avoid leaving inconsistent code, see below). However it failed to **overwrite** every other generated
-file in `api/internal/db/` (`usage.sql.go`, `models.go`, `db.go`, `jobs.sql.go`, etc.):
+Originally blocked: `api/internal/db/*.go` were owned `root:root` (leftover from an earlier `docker compose` run
+that wrote there as root), and this session's user had no way to `chown`/`chmod` them without an interactive
+sudo password. **Resolution (Batch 2)**: ownership was fixed externally to `k3n5h1n:k3n5h1n` before this batch
+started. Verified writable, ran `sqlc generate` cleanly, regenerated `CvIngestion`, `InsertCVIngestion`,
+`GetCVIngestion`, `UpdateCVIngestionStatus`, `UpsertIncrementIngestions`, `Usage.IngestionsCount`. `go build ./...`
+and `go test ./... -count=1` both green. Committed as `614b61d`. Seam B is now unblocked.
 
-```
-open /home/k3n5h1n/Escritorio/career-saas/career-ops-saas/api/internal/db/usage.sql.go: permission denied
-```
+### T-84 — `make test-rls` fails as a whole (pre-existing bug in `rls_test.sql`) — RESOLVED
 
-Root cause: those files are owned `root:root`, mode `644`, with no group/world write bit:
+Originally: the full `make test-rls` target halted on the pre-existing `db/tests/rls_test.sql` (`pg_class.rowsecurity`
+does not exist on PG16 — correct column is `relrowsecurity`), and even after that fix the file ran as `careerops`
+(superuser), which bypasses RLS unconditionally — a false positive. **Resolution (Batch 2)**: user explicitly
+approved folding this fix into Seam A/PR-A (see task instructions). Fixed `rowsecurity` -> `relrowsecurity`,
+switched seeding to `auth_upsert_user` (SECURITY DEFINER) so the whole file can run as `app_user`, fixed a
+previously-undiscovered `plan(24)` vs. actual-25-assertions mismatch, and updated the `Makefile` to invoke
+`pg_prove -U app_user` for `rls_test.sql` (was `-U careerops`). Verified RED (24/24 fail, `rowsecurity` error)
+before the fix and GREEN (25/25 pass) after, both as evidence in this same session. Committed as `876643e`.
+`make test-rls` as a whole now exits 0.
 
-```
--rw-r--r-- 1 root root 2202 jun  4 00:36 usage.sql.go
-```
+## Files changed (Batch 1 + Batch 2, cumulative)
 
-This is almost certainly leftover from an earlier `docker compose` run that executed `sqlc generate` (or wrote to
-that bind-mounted path) as the container's root user. My user (`k3n5h1n`, uid 1000) is in the `sudo` group but this
-session has no way to supply an interactive sudo password, so I cannot `chown`/`chmod` those files myself.
-
-**I removed the partially-generated `cv_ingestions.sql.go`** (it referenced the `CvIngestion` struct, which would
-not exist in `models.go` since that file could not be overwritten — leaving it would have produced a
-non-compiling package). The `api/internal/db/` directory is therefore unchanged from `main` after this batch.
-
-**Action needed before Seam B (PR-B) can compile:** someone with sudo/root needs to run, once:
-```
-sudo chown -R $(whoami):$(whoami) api/internal/db/
-```
-or equivalently fix the file ownership, then re-run:
-```
-cd db && /home/k3n5h1n/gopath/bin/sqlc generate
-```
-This regenerates `CvIngestion`, `InsertCVIngestion`, `GetCVIngestion`, `UpdateCVIngestionStatus`,
-`UpsertIncrementIngestions`, and `Usage.IngestionsCount` — all required before Seam B's Go service code compiles.
-
-### T-84 — `make test-rls` fails as a whole (pre-existing, out-of-scope bug)
-
-Running the full `make test-rls` target halts on the **pre-existing** `db/tests/rls_test.sql` (not touched by
-this change), independent of any `cv_ingestions` work:
-
-```
-psql:/db/tests/rls_test.sql:70: ERROR:  column "rowsecurity" does not exist
-LINE 2:   (SELECT rowsecurity FROM pg_class WHERE relname = 'users')...
-HINT:  Perhaps you meant to reference the column "pg_class.relrowsecurity".
-```
-
-`rls_test.sql` references `pg_class.rowsecurity`, which does not exist on PostgreSQL 16 (the real column is
-`relrowsecurity`). This means `rls_test.sql` could never have passed in this environment, for any table, old or
-new — it has 24/24 subtests fail on the very first assertion. Additionally, even if that column name were fixed,
-`rls_test.sql` is invoked as `careerops` (superuser), which bypasses RLS unconditionally — so its cross-tenant
-assertions would also be false positives until it's switched to run as `app_user` (the same fix applied to the
-new `cv_ingestions` test in this batch).
-
-Both issues are in a file outside Seam A's scope (`cv_ingestions`), so I did not modify `rls_test.sql`. The new
-`cv_ingestions_rls.test.sql` test (T-79) **does** pass, verified standalone as documented above. `make test-rls`
-as a single target does not yet exit 0 because Make stops at the first failing command (the legacy file), before
-reaching the new one.
-
-**Recommendation:** a follow-up task (outside this PR-A) should fix `db/tests/rls_test.sql`'s `rowsecurity` ->
-`relrowsecurity` column name and switch its `pg_prove` invocation to run as `app_user`, mirroring this batch's fix.
-
-## Files changed (this batch)
-
-- `db/tests/cv_ingestions_rls.test.sql` (new, then revised)
-- `db/migrations/002_ingest_cv.sql` (new)
-- `db/schema.sql` (mirrored DDL)
-- `db/rls.sql` (mirrored DDL)
-- `db/queries/cv_ingestions.sql` (new)
-- `db/queries/usage.sql` (extended)
-- `Makefile` (test-rls target fix)
-- `docker-compose.yml` (postgres service: added `db/tests` mount)
+- `db/tests/cv_ingestions_rls.test.sql` (new, then revised) — Batch 1
+- `db/migrations/002_ingest_cv.sql` (new) — Batch 1
+- `db/schema.sql` (mirrored DDL) — Batch 1
+- `db/rls.sql` (mirrored DDL) — Batch 1
+- `db/queries/cv_ingestions.sql` (new) — Batch 1
+- `db/queries/usage.sql` (extended) — Batch 1
+- `Makefile` (test-rls target fix — infra in Batch 1, app_user switch for legacy test in Batch 2) — Batch 1 + 2
+- `docker-compose.yml` (postgres service: added `db/tests` mount) — Batch 1
+- `api/internal/db/cv_ingestions.sql.go` (new, sqlc-generated) — Batch 2
+- `api/internal/db/models.go` (sqlc-generated: `CvIngestion` struct, `Usage.IngestionsCount`) — Batch 2
+- `api/internal/db/usage.sql.go` (sqlc-generated: `UpsertIncrementIngestions`) — Batch 2
+- `db/tests/rls_test.sql` (fixed: `relrowsecurity`, `app_user` seeding via `auth_upsert_user`, `plan(25)`) — Batch 2
 
 ## Commits (in order)
 
@@ -126,12 +148,18 @@ reaching the new one.
 3. `8a9e048` — `fix(db): run pgTAP cv_ingestions test as RLS-enforced app_user`
 4. `b60cff5` — `feat(db): mirror cv_ingestions DDL into schema.sql and rls.sql`
 5. `f90d415` — `feat(db): sqlc queries for cv_ingestions`
+6. `614b61d` — `chore(db): regenerate sqlc types for cv_ingestions`
+7. `876643e` — `fix(db): run legacy RLS pgTAP test as app_user and use relrowsecurity`
 
-## Next steps
+## Seam A status: COMPLETE
 
-1. Fix `api/internal/db/` file ownership (needs sudo) and re-run `sqlc generate` to complete T-83.
-2. Re-run `make test-rls` after fixing `rls_test.sql`'s column name + role (separate, out-of-scope follow-up) to
-   get a clean exit 0 for the whole target — or accept the documented standalone PASS for `cv_ingestions_rls.test.sql`
-   as T-84's evidence for this PR.
-3. Seam B (Go API ingest/status endpoints) cannot start until T-83 completes — it depends on the generated
-   `CvIngestion` struct and `Usage.IngestionsCount` field.
+All of T-79..T-84 are done, plus the user-approved legacy `rls_test.sql` fix. `make test-rls` (25/25 + 4/4) and
+`make test-go` (11 packages, all pass) are both green end-to-end on branch `feat/ingest-cv-db`. Not pushed, no PR
+opened — orchestrator reviews first per task constraints.
+
+## Next steps (Seam B and beyond — NOT started in this batch)
+
+1. Seam B (Go API ingest/status endpoints) can now start — it depends on the generated `CvIngestion` struct and
+   `Usage.IngestionsCount` field, both of which now exist and compile.
+2. Do not start Seam B/C/D/E from this apply-progress record without first re-reading the `tasks` artifact —
+   this record only covers Seam A.
