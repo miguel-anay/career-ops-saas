@@ -21,14 +21,14 @@ describe('notify', () => {
     expect(params).toHaveLength(1)
   })
 
-  it('payload contains event, scan_run_id, ts, and data fields', async () => {
+  it('payload contains event, run_id, ts, and data fields', async () => {
     await notify(mockClient, 'run-456', 'scan.job_found', { job_id: 'j1', title: 'Engineer' })
 
     const [, params] = mockClient.query.mock.calls[0]
     const payload = JSON.parse(params[0])
 
     expect(payload).toHaveProperty('event', 'scan.job_found')
-    expect(payload).toHaveProperty('scan_run_id', 'run-456')
+    expect(payload).toHaveProperty('run_id', 'run-456')
     expect(payload).toHaveProperty('ts')
     expect(payload).toHaveProperty('data')
     expect(payload.data).toEqual({ job_id: 'j1', title: 'Engineer' })

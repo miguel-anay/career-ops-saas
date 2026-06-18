@@ -90,7 +90,7 @@ func TestHub_BroadcastToCorrectUser(t *testing.T) {
 	hub.Register(scanRunB, "conn-b", chB)
 	time.Sleep(10 * time.Millisecond)
 
-	payloadA := []byte(`{"event":"scan.job_found","scan_run_id":"a"}`)
+	payloadA := []byte(`{"event":"scan.job_found","run_id":"a"}`)
 	hub.Broadcast(scanRunA, payloadA)
 
 	// Only chA should receive the message.
