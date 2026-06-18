@@ -50,6 +50,19 @@ func (m *MockService) CreateCV(ctx context.Context, userID uuid.UUID, title, con
 	return args.Get(0).(*db.Cv), args.Error(1)
 }
 
+func (m *MockService) EnqueueIngest(ctx context.Context, userID uuid.UUID, rawCV string) (uuid.UUID, error) {
+	args := m.Called(ctx, userID, rawCV)
+	return args.Get(0).(uuid.UUID), args.Error(1)
+}
+
+func (m *MockService) GetIngestion(ctx context.Context, userID, runID uuid.UUID) (*db.CvIngestion, error) {
+	args := m.Called(ctx, userID, runID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*db.CvIngestion), args.Error(1)
+}
+
 func newChiCtx(params map[string]string) context.Context {
 	rctx := chi.NewRouteContext()
 	for k, v := range params {
@@ -245,4 +258,253 @@ func TestCreateCV_ServiceError(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	svc.AssertExpectations(t)
+}
+
+// ---- Ingest handler tests (T-89) ----
+
+func TestIngest_HappyPath(t *testing.T) {
+	svc := &MockService{}
+	h := cv.NewHandler(svc, nil)
+
+	userID := uuid.New()
+	runID := uuid.New()
+	svc.On("EnqueueIngest", mock.Anything, userID, "some raw cv text").Return(runID, nil)
+
+	body, _ := json.Marshal(map[string]string{"raw_cv": "some raw cv text"})
+	req := httptest.NewRequest(http.MethodPost, "/api/cv/ingest", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(middleware.SetUserID(req.Context(), userID))
+	rec := httptest.NewRecorder()
+
+	h.Ingest(rec, req)
+
+	require.Equal(t, http.StatusAccepted, rec.Code)
+	var respBody map[string]interface{}
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&respBody))
+	assert.Equal(t, runID.String(), respBody["run_id"])
+	svc.AssertExpectations(t)
+}
+
+func TestIngest_MissingAuth(t *testing.T) {
+	svc := &MockService{}
+	h := cv.NewHandler(svc, nil)
+
+	body, _ := json.Marshal(map[string]string{"raw_cv": "some raw cv text"})
+	req := httptest.NewRequest(http.MethodPost, "/api/cv/ingest", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	h.Ingest(rec, req)
+
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	svc.AssertNotCalled(t, "EnqueueIngest")
+}
+
+func TestIngest_EmptyBody(t *testing.T) {
+	svc := &MockService{}
+	h := cv.NewHandler(svc, nil)
+
+	userID := uuid.New()
+	body, _ := json.Marshal(map[string]string{"raw_cv": ""})
+	req := httptest.NewRequest(http.MethodPost, "/api/cv/ingest", bytes.NewReader(body))
+	req = req.WithContext(middleware.SetUserID(req.Context(), userID))
+	rec := httptest.NewRecorder()
+
+	h.Ingest(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	svc.AssertNotCalled(t, "EnqueueIngest")
+}
+
+func TestIngest_WhitespaceOnlyBody(t *testing.T) {
+	svc := &MockService{}
+	h := cv.NewHandler(svc, nil)
+
+	userID := uuid.New()
+	body, _ := json.Marshal(map[string]string{"raw_cv": "   \n\t  "})
+	req := httptest.NewRequest(http.MethodPost, "/api/cv/ingest", bytes.NewReader(body))
+	req = req.WithContext(middleware.SetUserID(req.Context(), userID))
+	rec := httptest.NewRecorder()
+
+	h.Ingest(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	svc.AssertNotCalled(t, "EnqueueIngest")
+}
+
+func TestIngest_MissingField(t *testing.T) {
+	svc := &MockService{}
+	h := cv.NewHandler(svc, nil)
+
+	userID := uuid.New()
+	body, _ := json.Marshal(map[string]string{})
+	req := httptest.NewRequest(http.MethodPost, "/api/cv/ingest", bytes.NewReader(body))
+	req = req.WithContext(middleware.SetUserID(req.Context(), userID))
+	rec := httptest.NewRecorder()
+
+	h.Ingest(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	svc.AssertNotCalled(t, "EnqueueIngest")
+}
+
+func TestIngest_OversizedBody(t *testing.T) {
+	svc := &MockService{}
+	h := cv.NewHandler(svc, nil)
+
+	userID := uuid.New()
+	// maxRawCVLength is 100KB (per design decision); exceed it.
+	oversized := make([]byte, 100*1024+1)
+	for i := range oversized {
+		oversized[i] = 'a'
+	}
+	body, _ := json.Marshal(map[string]string{"raw_cv": string(oversized)})
+	req := httptest.NewRequest(http.MethodPost, "/api/cv/ingest", bytes.NewReader(body))
+	req = req.WithContext(middleware.SetUserID(req.Context(), userID))
+	rec := httptest.NewRecorder()
+
+	h.Ingest(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	svc.AssertNotCalled(t, "EnqueueIngest")
+}
+
+func TestIngest_UsageLimitExceeded(t *testing.T) {
+	svc := &MockService{}
+	h := cv.NewHandler(svc, nil)
+
+	userID := uuid.New()
+	svc.On("EnqueueIngest", mock.Anything, userID, "some raw cv text").Return(uuid.Nil, cv.ErrUsageLimitExceeded)
+
+	body, _ := json.Marshal(map[string]string{"raw_cv": "some raw cv text"})
+	req := httptest.NewRequest(http.MethodPost, "/api/cv/ingest", bytes.NewReader(body))
+	req = req.WithContext(middleware.SetUserID(req.Context(), userID))
+	rec := httptest.NewRecorder()
+
+	h.Ingest(rec, req)
+
+	assert.Equal(t, http.StatusPaymentRequired, rec.Code)
+	svc.AssertExpectations(t)
+}
+
+func TestIngest_ServiceInternalError(t *testing.T) {
+	svc := &MockService{}
+	h := cv.NewHandler(svc, nil)
+
+	userID := uuid.New()
+	svc.On("EnqueueIngest", mock.Anything, userID, "some raw cv text").Return(uuid.Nil, assert.AnError)
+
+	body, _ := json.Marshal(map[string]string{"raw_cv": "some raw cv text"})
+	req := httptest.NewRequest(http.MethodPost, "/api/cv/ingest", bytes.NewReader(body))
+	req = req.WithContext(middleware.SetUserID(req.Context(), userID))
+	rec := httptest.NewRecorder()
+
+	h.Ingest(rec, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	svc.AssertExpectations(t)
+}
+
+// ---- GetIngestion handler tests (T-91) ----
+
+func TestGetIngestion_HappyPath(t *testing.T) {
+	svc := &MockService{}
+	h := cv.NewHandler(svc, nil)
+
+	userID := uuid.New()
+	runID := uuid.New()
+	ingestion := &db.CvIngestion{
+		ID:        runID,
+		UserID:    userID,
+		Status:    "pending",
+		StartedAt: time.Now(),
+	}
+	svc.On("GetIngestion", mock.Anything, userID, runID).Return(ingestion, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/cv/ingest/"+runID.String(), nil)
+	ctx := newChiCtx(map[string]string{"id": runID.String()})
+	ctx = middleware.SetUserID(ctx, userID)
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	h.GetIngestion(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var body map[string]interface{}
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&body))
+	assert.Equal(t, runID.String(), body["id"])
+	assert.Equal(t, "pending", body["status"])
+	svc.AssertExpectations(t)
+}
+
+func TestGetIngestion_NotFound(t *testing.T) {
+	svc := &MockService{}
+	h := cv.NewHandler(svc, nil)
+
+	userID := uuid.New()
+	runID := uuid.New()
+	svc.On("GetIngestion", mock.Anything, userID, runID).Return(nil, cv.ErrNotFound)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/cv/ingest/"+runID.String(), nil)
+	ctx := newChiCtx(map[string]string{"id": runID.String()})
+	ctx = middleware.SetUserID(ctx, userID)
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	h.GetIngestion(rec, req)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	svc.AssertExpectations(t)
+}
+
+func TestGetIngestion_NonOwnerTreatedAsNotFound(t *testing.T) {
+	svc := &MockService{}
+	h := cv.NewHandler(svc, nil)
+
+	userB := uuid.New()
+	runID := uuid.New() // owned by user A, but RLS makes it invisible to B
+	svc.On("GetIngestion", mock.Anything, userB, runID).Return(nil, cv.ErrNotFound)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/cv/ingest/"+runID.String(), nil)
+	ctx := newChiCtx(map[string]string{"id": runID.String()})
+	ctx = middleware.SetUserID(ctx, userB)
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	h.GetIngestion(rec, req)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	svc.AssertExpectations(t)
+}
+
+func TestGetIngestion_MalformedID(t *testing.T) {
+	svc := &MockService{}
+	h := cv.NewHandler(svc, nil)
+
+	userID := uuid.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/cv/ingest/not-a-uuid", nil)
+	ctx := newChiCtx(map[string]string{"id": "not-a-uuid"})
+	ctx = middleware.SetUserID(ctx, userID)
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	h.GetIngestion(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	svc.AssertNotCalled(t, "GetIngestion")
+}
+
+func TestGetIngestion_MissingAuth(t *testing.T) {
+	svc := &MockService{}
+	h := cv.NewHandler(svc, nil)
+
+	runID := uuid.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/cv/ingest/"+runID.String(), nil)
+	ctx := newChiCtx(map[string]string{"id": runID.String()})
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	h.GetIngestion(rec, req)
+
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	svc.AssertNotCalled(t, "GetIngestion")
 }

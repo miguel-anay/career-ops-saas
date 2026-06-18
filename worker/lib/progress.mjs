@@ -2,7 +2,7 @@
  * Emit a PostgreSQL NOTIFY event on the `scan_progress` channel.
  *
  * Payload shape:
- *   { event, scan_run_id, ts: <ISO-8601>, data }
+ *   { event, run_id, ts: <ISO-8601>, data }
  *
  * Consumers (e.g., SSE endpoint in the Go API) listen on `scan_progress`
  * and forward events to connected clients in real-time.
@@ -15,7 +15,7 @@
 export async function notify(pgClient, scanRunId, event, data) {
   const payload = JSON.stringify({
     event,
-    scan_run_id: scanRunId,
+    run_id: scanRunId,
     ts: new Date().toISOString(),
     data,
   })

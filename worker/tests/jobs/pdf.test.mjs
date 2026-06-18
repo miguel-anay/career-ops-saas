@@ -139,4 +139,53 @@ describe('handleGeneratePDF', () => {
     const params = updateCall[2]
     expect(params).toContain(expectedKey)
   })
+
+  it('reads the candidate name from the new nested profile.candidate.full_name schema', async () => {
+    mockRenderPDF.mockResolvedValue(Buffer.from('pdf'))
+    mockUploadBuffer.mockResolvedValue({ key: 'user-n/job-n/cv.pdf' })
+
+    mockTenantQuery.mockResolvedValue({
+      rows: [{
+        id: 'x',
+        content_md: 'content',
+        blocks_json: '{}',
+        title: 'Eng',
+        company: 'Corp',
+        url: 'https://c.com/j',
+        cv_markdown: '# CV',
+        profile_json: JSON.stringify({ candidate: { full_name: 'Jane Doe' } }),
+      }],
+    })
+
+    const job = { data: { user_id: 'user-n', job_id: 'job-n', application_id: 'app-n' } }
+    await handleGeneratePDF(job)
+
+    const htmlArg = mockRenderPDF.mock.calls[0][0]
+    expect(htmlArg).toContain('Jane Doe')
+  })
+
+  it('tolerates a {parse_error:true} profile without throwing, falling back to Candidate', async () => {
+    mockRenderPDF.mockResolvedValue(Buffer.from('pdf'))
+    mockUploadBuffer.mockResolvedValue({ key: 'user-p/job-p/cv.pdf' })
+
+    mockTenantQuery.mockResolvedValue({
+      rows: [{
+        id: 'x',
+        content_md: 'content',
+        blocks_json: '{}',
+        title: 'Eng',
+        company: 'Corp',
+        url: 'https://c.com/j',
+        cv_markdown: '# CV',
+        profile_json: JSON.stringify({ parse_error: true }),
+      }],
+    })
+
+    const job = { data: { user_id: 'user-p', job_id: 'job-p', application_id: 'app-p' } }
+
+    await expect(handleGeneratePDF(job)).resolves.not.toThrow()
+
+    const htmlArg = mockRenderPDF.mock.calls[0][0]
+    expect(htmlArg).toContain('Candidate')
+  })
 })

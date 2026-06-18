@@ -109,7 +109,7 @@ func (h *Hub) Unregister(scanRunID uuid.UUID, connID string) {
 // Broadcast sends a message to all connections subscribed to a scan run.
 // The payload must be a valid JSON envelope:
 //
-//	{"event": "...", "scan_run_id": "...", "ts": "2026-...", "data": {...}}
+//	{"event": "...", "run_id": "...", "ts": "2026-...", "data": {...}}
 func (h *Hub) Broadcast(scanRunID uuid.UUID, msg []byte) {
 	h.broadcast <- broadcastMsg{scanRunID: scanRunID, payload: msg}
 }

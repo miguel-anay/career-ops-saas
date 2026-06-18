@@ -22,6 +22,11 @@ var ErrNotFound = errors.New("not found")
 // ErrNoPDFPath is returned when the application has no PDF path yet.
 var ErrNoPDFPath = errors.New("PDF not yet generated")
 
+// ErrUsageLimitExceeded is returned when the user has reached their free plan ingestion limit.
+var ErrUsageLimitExceeded = errors.New("ingestion limit reached for free plan")
+
+const freePlanIngestLimit = 5
+
 // Service contains business logic for the cv domain.
 type Service struct {
 	pool *pgxpool.Pool
@@ -35,6 +40,33 @@ func NewService(pool *pgxpool.Pool) *Service {
 func (s *Service) queries() *db.Queries {
 	sqlDB := stdlib.OpenDBFromPool(s.pool)
 	return db.New(sqlDB)
+}
+
+// withTenant runs fn inside a database transaction with app.current_user_id
+// set via set_config(..., true) (transaction-local), so RLS policies on
+// tenant tables (cv_ingestions, usage, ...) are enforced for the duration of
+// fn. The transaction is committed if fn succeeds, rolled back otherwise.
+//
+// NOTE: this is a Seam-B-local fix. The rest of the cv package (and other
+// domains) still build *db.Queries via queries(), which never sets the RLS
+// session variable — see apply-progress for the codebase-wide gap.
+func (s *Service) withTenant(ctx context.Context, userID uuid.UUID, fn func(q *db.Queries) error) error {
+	sqlDB := stdlib.OpenDBFromPool(s.pool)
+	tx, err := sqlDB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tenant tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, "SELECT set_config('app.current_user_id', $1, true)", userID.String()); err != nil {
+		return fmt.Errorf("set tenant user: %w", err)
+	}
+
+	if err := fn(db.New(tx)); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 // generatePDFPayload is the pg-boss job payload for "generate-pdf".
@@ -166,4 +198,111 @@ func (s *Service) SetMasterCV(ctx context.Context, userID, cvID uuid.UUID) error
 		ID:     cvID,
 		UserID: userID,
 	})
+}
+
+// ingestCVPayload is the pg-boss job payload for "ingest-cv".
+type ingestCVPayload struct {
+	UserID uuid.UUID `json:"user_id"`
+	RunID  uuid.UUID `json:"run_id"`
+	RawCV  string    `json:"raw_cv"`
+}
+
+// EnqueueIngest checks the free-plan ingestion usage limit, inserts a cv_ingestions
+// row, increments usage.ingestions_count, and enqueues an "ingest-cv" pg-boss job.
+// Returns the cv_ingestions row id (run_id).
+//
+// The usage check, the cv_ingestions insert, and the usage increment all run
+// inside ONE tenant-scoped transaction (withTenant) so app.current_user_id is
+// set for RLS and the three steps are atomic. The pg-boss enqueue happens
+// AFTER that transaction commits, using the plain pool (pgboss.job has no
+// RLS policy). If enqueue fails after commit, the cv_ingestions row and usage
+// increment remain — an orphaned 'pending' row is acceptable for MVP.
+//
+// IMPORTANT: usage.ingestions_count is incremented HERE, at enqueue time, not
+// in the worker. See apply-progress for the Seam-C note: T-102 (worker
+// handleIngestCV) must NOT also increment usage, or counts would double.
+func (s *Service) EnqueueIngest(ctx context.Context, userID uuid.UUID, rawCV string) (uuid.UUID, error) {
+	month := time.Now().UTC().Format("2006-01")
+
+	var runID uuid.UUID
+	err := s.withTenant(ctx, userID, func(q *db.Queries) error {
+		// 1. Check usage limit for free plan (current month).
+		usage, err := q.GetUsageByUserMonth(ctx, db.GetUsageByUserMonthParams{
+			UserID: userID,
+			Month:  month,
+		})
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("get usage: %w", err)
+		}
+		// If no usage row exists yet, IngestionsCount is treated as 0.
+		if !errors.Is(err, sql.ErrNoRows) && usage.IngestionsCount >= freePlanIngestLimit {
+			return ErrUsageLimitExceeded
+		}
+
+		// 2. Insert cv_ingestions row.
+		run, err := q.InsertCVIngestion(ctx, userID)
+		if err != nil {
+			return fmt.Errorf("insert ingestion: %w", err)
+		}
+
+		// 3. Increment usage.ingestions_count (UPSERT semantics).
+		if _, err := q.UpsertIncrementIngestions(ctx, db.UpsertIncrementIngestionsParams{
+			UserID: userID,
+			Month:  month,
+		}); err != nil {
+			return fmt.Errorf("increment ingestions usage: %w", err)
+		}
+
+		runID = run.ID
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, ErrUsageLimitExceeded) {
+			return uuid.Nil, ErrUsageLimitExceeded
+		}
+		return uuid.Nil, err
+	}
+
+	// 4. Enqueue ingest-cv (outside the tenant tx — pgboss.job has no RLS policy).
+	payload, err := json.Marshal(ingestCVPayload{
+		UserID: userID,
+		RunID:  runID,
+		RawCV:  rawCV,
+	})
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("marshal payload: %w", err)
+	}
+
+	if err := queue.Enqueue(ctx, s.pool, queue.Job{
+		Name: "ingest-cv",
+		Data: json.RawMessage(payload),
+	}); err != nil {
+		return uuid.Nil, fmt.Errorf("enqueue ingest-cv: %w", err)
+	}
+
+	return runID, nil
+}
+
+// GetIngestion returns the cv_ingestions row for the given run id. The lookup
+// runs inside a tenant-scoped transaction (withTenant) so RLS enforces
+// isolation at the query layer: a non-owner's lookup returns sql.ErrNoRows
+// (mapped to ErrNotFound), not because of an app-layer ownership check, but
+// because the row is invisible under the caller's app.current_user_id.
+func (s *Service) GetIngestion(ctx context.Context, userID, runID uuid.UUID) (*db.CvIngestion, error) {
+	var ingestion db.CvIngestion
+	err := s.withTenant(ctx, userID, func(q *db.Queries) error {
+		row, err := q.GetCVIngestion(ctx, runID)
+		if err != nil {
+			return err
+		}
+		ingestion = row
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("get ingestion: %w", err)
+	}
+	return &ingestion, nil
 }

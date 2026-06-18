@@ -13,10 +13,10 @@ import (
 )
 
 // notifyPayload is the minimal structure of the NOTIFY payload from workers.
-// Full envelope: {"event": "...", "scan_run_id": "...", "ts": "...", "data": {...}}
+// Full envelope: {"event": "...", "run_id": "...", "ts": "...", "data": {...}}
 type notifyPayload struct {
 	Event     string          `json:"event"`
-	ScanRunID string          `json:"scan_run_id"`
+	RunID     string          `json:"run_id"`
 	Ts        string          `json:"ts"`
 	Data      json.RawMessage `json:"data"`
 }
@@ -96,9 +96,9 @@ func listenLoop(ctx context.Context, conn *pgx.Conn, hub *Hub) error {
 			continue
 		}
 
-		scanRunID, err := uuid.Parse(payload.ScanRunID)
+		scanRunID, err := uuid.Parse(payload.RunID)
 		if err != nil {
-			slog.Warn("ws listener: invalid scan_run_id in NOTIFY payload", "error", err, "raw", payload.ScanRunID)
+			slog.Warn("ws listener: invalid run_id in NOTIFY payload", "error", err, "raw", payload.RunID)
 			continue
 		}
 
