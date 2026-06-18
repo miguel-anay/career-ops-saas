@@ -17,7 +17,7 @@
 --   3. The schema + rls.sql (or the equivalent migration) must be applied
 
 BEGIN;
-SELECT plan(4);
+SELECT plan(6);
 
 -- ============================================================
 -- Setup: create two independent users via the SECURITY DEFINER helper
@@ -40,7 +40,7 @@ BEGIN
   -- Seed a cv_ingestions row as user A
   PERFORM set_config('app.current_user_id', v_user_a.id::text, false);
   INSERT INTO cv_ingestions (user_id, status)
-  VALUES (v_user_a.id, 'running')
+  VALUES (v_user_a.id, 'pending')
   RETURNING id INTO v_ingestion_id;
   PERFORM set_config('test.ingestion_id', v_ingestion_id::text, false);
 END;
@@ -74,6 +74,38 @@ SELECT is(
   (SELECT count(*)::int FROM cv_ingestions WHERE id = current_setting('test.ingestion_id')::uuid),
   0,
   'User B cannot fetch User A cv_ingestion by ID (NFR-01)'
+);
+
+-- ============================================================
+-- Write-path isolation: User B's UPDATE against User A's row must
+-- affect 0 rows (RLS hides the row from B's USING clause before the
+-- UPDATE can even match it) — proves the write path, not just SELECT.
+-- ============================================================
+WITH updated AS (
+  UPDATE cv_ingestions
+  SET status = 'completed'
+  WHERE id = current_setting('test.ingestion_id')::uuid
+  RETURNING id
+)
+SELECT is(
+  (SELECT count(*)::int FROM updated),
+  0,
+  'User B cannot UPDATE User A cv_ingestions row (write-path RLS)'
+);
+
+-- ============================================================
+-- Write-path isolation: User B cannot INSERT a row claiming User A's
+-- id as user_id — the policy's WITH CHECK denies it even though B is
+-- the one performing the INSERT.
+-- ============================================================
+SELECT throws_ok(
+  format(
+    $sql$INSERT INTO cv_ingestions (user_id, status) VALUES (%L, 'pending')$sql$,
+    current_setting('test.user_a')
+  ),
+  '42501',
+  NULL,
+  'User B cannot INSERT a cv_ingestions row for User A (WITH CHECK denies it)'
 );
 
 SELECT * FROM finish();

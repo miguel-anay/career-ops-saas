@@ -46,7 +46,11 @@ func (q *Queries) InsertCVIngestion(ctx context.Context, userID uuid.UUID) (CvIn
 }
 
 const updateCVIngestionStatus = `-- name: UpdateCVIngestionStatus :one
-UPDATE cv_ingestions SET status = $2, finished_at = now() WHERE id = $1 RETURNING id, user_id, status, started_at, finished_at
+UPDATE cv_ingestions
+SET status = $2,
+    finished_at = CASE WHEN $2 IN ('completed', 'failed') THEN now() ELSE finished_at END
+WHERE id = $1
+RETURNING id, user_id, status, started_at, finished_at
 `
 
 type UpdateCVIngestionStatusParams struct {

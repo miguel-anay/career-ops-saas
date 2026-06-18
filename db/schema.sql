@@ -135,8 +135,8 @@ CREATE TABLE usage (
 CREATE TABLE cv_ingestions (
   id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id     uuid        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  status      text        NOT NULL DEFAULT 'running'
-                            CHECK (status IN ('running','completed','failed')),
+  status      text        NOT NULL DEFAULT 'pending'
+                            CHECK (status IN ('pending','processing','completed','failed')),
   started_at  timestamptz NOT NULL DEFAULT now(),
   finished_at timestamptz
 );
