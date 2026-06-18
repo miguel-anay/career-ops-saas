@@ -1,9 +1,9 @@
 # Apply Progress — `ingest-cv`
 
-> Batch: 1 (Seam A only — DB schema + migration + sqlc) + Batch 2 (T-83/T-84 close-out + legacy RLS fix)
-> Branch: `feat/ingest-cv-db`
-> Strict TDD: active (RED -> GREEN per task, sequential T-79 -> T-84)
-> Seam A status: **COMPLETE**. Do not start Seam B/C/D/E from this record without a fresh tasks read.
+> Batches: 1+2 (Seam A, branch `feat/ingest-cv-db`) · 3 (Seam B, branch `feat/ingest-cv-api`) · 4 (Seam E, branch `feat/ingest-cv-web`)
+> Strict TDD: active (RED -> GREEN per task)
+> Seam A status: **COMPLETE**. Seam B status: **code-complete, RLS-engaged, unit-green; NOT yet DB-verified** (orchestrator must run the integration test against a live DB — see Batch 3 section below). Seam E status: **COMPLETE**.
+> Seam C/D not started. Do not start them from this record without a fresh tasks read.
 
 ## Task status
 
@@ -158,9 +158,132 @@ All of T-79..T-84 are done, plus the user-approved legacy `rls_test.sql` fix. `m
 `make test-go` (11 packages, all pass) are both green end-to-end on branch `feat/ingest-cv-db`. Not pushed, no PR
 opened — orchestrator reviews first per task constraints.
 
-## Next steps (Seam B and beyond — NOT started in this batch)
+## Batch 3 — Seam B (Go API ingest/status endpoints), branch `feat/ingest-cv-api`
 
-1. Seam B (Go API ingest/status endpoints) can now start — it depends on the generated `CvIngestion` struct and
-   `Usage.IngestionsCount` field, both of which now exist and compile.
-2. Do not start Seam B/C/D/E from this apply-progress record without first re-reading the `tasks` artifact —
-   this record only covers Seam A.
+Seam B's Go code (T-85..T-94, `handler.go`/`service.go`/`handler_test.go`) was already written with 23 green unit
+tests, but those mock the `Servicer` — they never exercised RLS. Root cause found: the API connects as `app_user`
+(plain LOGIN role, no SUPERUSER/BYPASSRLS); `cv_ingestions` and `usage` both have FORCE+ENABLE RLS gated on
+`current_setting('app.current_user_id')`; the only code that ever sets that var is `platform.WithTenant`, which no
+service in the codebase calls, including `cv.Service` (`queries()` uses `stdlib.OpenDBFromPool` with the var never
+set). As written, `EnqueueIngest` would fail the `WITH CHECK` on insert, and `GetIngestion` would 404 even for the
+owner.
+
+**Fix (Seam-B-scoped only)**: added `withTenant(ctx, userID, fn)` helper to `api/internal/cv/service.go` that opens
+a `*sql.Tx` via `stdlib.OpenDBFromPool`, runs `SELECT set_config('app.current_user_id', $1, true)` (parameterized,
+transaction-local), then `fn(db.New(tx))`, then commits. Rewrote `EnqueueIngest` to run usage-check +
+`InsertCVIngestion` + `UpsertIncrementIngestions` inside ONE `withTenant` transaction (atomic, RLS-engaged);
+`queue.Enqueue` stays outside (after commit) since `pgboss.job` has no RLS policy — an orphaned pending row on
+enqueue failure is accepted as MVP tradeoff. Rewrote `GetIngestion` to call `GetCVIngestion` inside `withTenant` —
+non-owner lookups now genuinely return `sql.ErrNoRows` because RLS hides the row, not via any app-layer check.
+
+**Usage increment / spec-design conflict resolved**: spec Req 6 says `ingestions_count` increments "on enqueue";
+design.md's worker pseudocode (`handleIngestCV` step 6) also showed the UPSERT happening in the worker — that
+would double count. Resolution: increment happens ONLY at enqueue time (in `EnqueueIngest`, via
+`UpsertIncrementIngestions` inside the same tenant tx). **Seam C's future T-102 (`handleIngestCV`) MUST NOT also
+increment usage** — worker should only write `users.cv_markdown`/`profile_json` and transition
+`cv_ingestions.status`.
+
+**Codebase-wide RLS gap — recorded as follow-up, NOT fixed**: `platform.WithTenant` is dead code unused anywhere
+else. `evaluate/service.go:37` and `scan/service.go:26` have the identical pattern (`stdlib.OpenDBFromPool` with
+tenant var never set) — meaning `evaluate` and `scan` (and likely `companies`/`tracker`/`jobs`) currently run all
+DB access with `app.current_user_id` unset. Pre-existing, codebase-wide issue outside `ingest-cv` scope; recommend
+a dedicated follow-up SDD change (e.g. `fix-tenant-rls-engagement`).
+
+Tests: new `api/internal/cv/ingest_integration_test.go` — DB-gated (skips cleanly if `TEST_DATABASE_URL` unset),
+connects via `platform.NewPool`, seeds 2 users via `auth_upsert_user` (SECURITY DEFINER, bypasses RLS for setup
+like production OAuth). 5 subtests: owner enqueue creates row + increments usage to 1; second enqueue increments
+to 2 while `evaluations_count` stays unaffected; first-ingestion-of-month-with-no-usage-row succeeds at count 1;
+limit gating blocks the 6th call with `ErrUsageLimitExceeded` and does not create a row or increment past 5; RLS
+isolation — owner `GetIngestion` succeeds, non-owner `GetIngestion` on the same `run_id` returns `ErrNotFound`.
+
+Verification done (no live DB, per task constraint): `go build ./...` clean; `go vet ./...` clean;
+`go test ./internal/cv/... -count=1 -v` — 23 unit tests PASS, `TestCVIngest_RLS_Integration` SKIPs cleanly; full
+`go test ./... -count=1` — all 11 packages pass, zero regressions.
+
+**Command for orchestrator to run against a live DB** (matches `docker-compose.yml`'s `app_user`/`app_pw`):
+```
+docker compose up -d postgres
+TEST_DATABASE_URL="postgres://app_user:app_pw@localhost:5432/careerops?sslmode=disable" \
+  go test ./internal/cv/... -run TestCVIngest_RLS_Integration -v -count=1
+```
+(run from `api/`; DB needs `001_initial.sql` + `002_ingest_cv.sql` applied)
+
+Files changed (Batch 3): `api/internal/cv/service.go` (modified — `withTenant` helper, rewrote
+`EnqueueIngest`/`GetIngestion`), `api/internal/cv/ingest_integration_test.go` (new). `handler.go`/`handler_test.go`
+were already final from before this batch, untouched in Batch 3.
+
+**Status**: Seam B code-complete + RLS-engaged + unit-green, but NOT YET VERIFIED against a live DB — orchestrator
+must run the integration test command above.
+
+## Batch 4 — Seam E (web hook `useJobProgress` + UI), branch `feat/ingest-cv-web`
+
+**Strict TDD followed**: RED confirmed for both the hook test (import-not-found) and the page test
+(import-not-found) before any implementation file was written.
+
+**T-111/T-112 — `useJobProgress` hook** (`web/hooks/useJobProgress.ts`, test
+`web/__tests__/hooks/useJobProgress.test.tsx`, 7 tests): generalized clone of `useScanProgress.ts`. Status enum
+`idle|connecting|working|completed|error`. `connect(runId)` builds the WS URL via
+`URLSearchParams({ scan_run_id: runId })` + `token` — reuses the existing `/ws/scan` route and the existing
+`scan_run_id` query-param name verbatim (per task instruction: only the envelope event names differ, not the
+param). Matches incoming envelope on `ingest.completed` (→ `completed`, payload surfaced via `setPayload`) and
+`ingest.failed` (→ `error`, payload surfaced). Reconnect-once: close while not in a terminal state schedules
+exactly one retry via `setTimeout(() => doConnect(runId), 1000)`.
+
+**Bug found and fixed during TDD (not present in `useScanProgress`'s simpler case)**: a naive port where the
+reconnect timer called the public `connect(runId)` re-armed `reconnectAttempted.current = false` on every retry,
+allowing unlimited reconnects instead of exactly one. Fixed by splitting a private `doConnect(runId)` (the actual
+WS-opening logic, does NOT touch the reconnect-attempted flag) from the public `connect(runId)` (resets the flag,
+then calls `doConnect`) — only `doConnect` is what the `onclose` retry timer calls. Caught by the
+"reconnects once after an unexpected close" test, which asserts a 2nd close produces no 3rd WS instance.
+
+Two-different-`run_id`s-do-not-cross-deliver verified by rendering two independent hook instances connected to
+different `run_id`s and asserting an event sent to one connection's mock WS does not change the other's status/
+payload.
+
+**T-113/T-114 — Paste-CV UI**: `web/app/cv/ingest/page.tsx` (new route) + test
+`web/__tests__/app/ingest-cv.test.tsx` (6 tests). Textarea (placeholder "Paste your CV text here…") + Submit
+button (disabled when empty/whitespace-only or submitting) wired to `postIngest`/`getIngestion`, newly added to
+`web/lib/api.ts`:
+- `postIngest(rawCV: string): Promise<{run_id: string}>` → `apiPost('/api/cv/ingest', {raw_cv: rawCV})`
+- `getIngestion(runId: string): Promise<IngestionStatus>` → `apiGet('/api/cv/ingest/${runId}')`
+- `IngestionStatus` shape: `{id, status: 'pending'|'processing'|'completed'|'failed', started_at, finished_at}`
+
+On submit: calls `postIngest(rawCV.trim())`, stores `run_id`, calls `connect(run_id)` from `useJobProgress()`.
+Live status renders from hook `status`/`payload` ("Processing your CV…" while `working`, "Completed"/"Failed"
+labels + JSON payload dump on terminal states). **Polling fallback**: a `useEffect` keyed on
+`[runId, status, isConnected, stopPolling]` starts a `setInterval(..., 4000)` calling `getIngestion(runId)` only
+when a run is in flight (`status` not idle/completed/error) AND the WS is NOT connected (`isConnected === false`);
+stops the interval once polling itself observes a terminal `completed`/`failed` status, or once the hook's own
+`status` reaches a terminal state, or once the WS reconnects (`isConnected` flips true). An `effectiveStatus`
+derived value lets a polling-discovered terminal state override the hook's possibly-stuck `working` status when
+the WS never recovers.
+
+**Test-only fix**: the "completed" page test originally asserted `screen.getByText(/completed/i)` which matched
+both the "Completed" label AND the JSON-dumped `"status": "completed"` string in the same DOM tree (multiple
+elements found). Fixed the test assertion to the exact string `screen.getByText('Completed')` rather than
+weakening the component — the JSON payload dump is intentional UI behavior (surfaces the full terminal payload
+per spec Req 5).
+
+**Files changed (Batch 4)**:
+- `web/hooks/useJobProgress.ts` (new)
+- `web/__tests__/hooks/useJobProgress.test.tsx` (new, 7 tests)
+- `web/app/cv/ingest/page.tsx` (new)
+- `web/__tests__/app/ingest-cv.test.tsx` (new, 6 tests)
+- `web/lib/api.ts` (modified — added `postIngest`, `getIngestion`, `IngestRunResponse`, `IngestionStatus`)
+- `useScanProgress.ts` and the scan flow were NOT touched, per task constraint.
+
+**Verification**: `cd web && npm test -- --run` → **7 test files passed, 30 tests passed** (was 5 files/17 tests
+before this batch; this batch added 2 files/13 tests: 7 hook + 6 page). `npx tsc --noEmit` clean. `npx next lint`
+clean — no warnings or errors. No test left RED.
+
+**Status**: Seam E **COMPLETE** (T-111..T-115 all done) on branch `feat/ingest-cv-web`. Not committed, not
+pushed, no PR opened — orchestrator reviews first per task constraints.
+
+## Next steps (Seam C/D — NOT started)
+
+1. Seam D (WS field rename `scan_run_id`→`run_id`, atomic) has no code dependency on Seam E and can land anytime;
+   Seam E's hook already reads the envelope key `run_id` per the task contract, so once Seam D actually lands in
+   `worker/lib/progress.mjs`/`api/internal/ws/listener.go`, Seam E requires no changes.
+2. Seam C (worker `ingest-cv` job) still depends on Seam D landing first for the NOTIFY field name (see Seam C's
+   sequencing note in `tasks.md`) and on Seam A (table exists).
+3. Do not start Seam C/D from this apply-progress record without first re-reading the `tasks` artifact.
