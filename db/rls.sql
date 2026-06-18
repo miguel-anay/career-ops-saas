@@ -1,5 +1,8 @@
 -- Row-Level Security for career-ops-saas
--- All policies use current_setting('app.current_user_id', true)::uuid
+-- All policies use NULLIF(current_setting('app.current_user_id', true), '')::uuid
+-- so an empty-string GUC (left on a pooled connection after a prior tenant
+-- tx ended) degrades to a clean deny, not a 22P02 cast error
+-- (db/migrations/003_rls_nullif.sql — rls-tenancy-wiring, Req 4).
 -- The runtime DB role (app_user) MUST NOT be the table owner to avoid
 -- implicit RLS bypass. Use FORCE ROW LEVEL SECURITY on app_user.
 
@@ -33,37 +36,37 @@ ALTER TABLE cv_ingestions     FORCE ROW LEVEL SECURITY;
 -- ---------------------------------------------------------------------------
 
 CREATE POLICY tenant_users ON users
-  USING (id = current_setting('app.current_user_id', true)::uuid)
-  WITH CHECK (id = current_setting('app.current_user_id', true)::uuid);
+  USING (id = NULLIF(current_setting('app.current_user_id', true), '')::uuid)
+  WITH CHECK (id = NULLIF(current_setting('app.current_user_id', true), '')::uuid);
 
 CREATE POLICY tenant_watched_companies ON watched_companies
-  USING (user_id = current_setting('app.current_user_id', true)::uuid)
-  WITH CHECK (user_id = current_setting('app.current_user_id', true)::uuid);
+  USING (user_id = NULLIF(current_setting('app.current_user_id', true), '')::uuid)
+  WITH CHECK (user_id = NULLIF(current_setting('app.current_user_id', true), '')::uuid);
 
 CREATE POLICY tenant_jobs ON jobs
-  USING (user_id = current_setting('app.current_user_id', true)::uuid)
-  WITH CHECK (user_id = current_setting('app.current_user_id', true)::uuid);
+  USING (user_id = NULLIF(current_setting('app.current_user_id', true), '')::uuid)
+  WITH CHECK (user_id = NULLIF(current_setting('app.current_user_id', true), '')::uuid);
 
 CREATE POLICY tenant_applications ON applications
-  USING (user_id = current_setting('app.current_user_id', true)::uuid)
-  WITH CHECK (user_id = current_setting('app.current_user_id', true)::uuid);
+  USING (user_id = NULLIF(current_setting('app.current_user_id', true), '')::uuid)
+  WITH CHECK (user_id = NULLIF(current_setting('app.current_user_id', true), '')::uuid);
 
 CREATE POLICY tenant_reports ON reports
-  USING (user_id = current_setting('app.current_user_id', true)::uuid)
-  WITH CHECK (user_id = current_setting('app.current_user_id', true)::uuid);
+  USING (user_id = NULLIF(current_setting('app.current_user_id', true), '')::uuid)
+  WITH CHECK (user_id = NULLIF(current_setting('app.current_user_id', true), '')::uuid);
 
 CREATE POLICY tenant_cvs ON cvs
-  USING (user_id = current_setting('app.current_user_id', true)::uuid)
-  WITH CHECK (user_id = current_setting('app.current_user_id', true)::uuid);
+  USING (user_id = NULLIF(current_setting('app.current_user_id', true), '')::uuid)
+  WITH CHECK (user_id = NULLIF(current_setting('app.current_user_id', true), '')::uuid);
 
 CREATE POLICY tenant_scan_runs ON scan_runs
-  USING (user_id = current_setting('app.current_user_id', true)::uuid)
-  WITH CHECK (user_id = current_setting('app.current_user_id', true)::uuid);
+  USING (user_id = NULLIF(current_setting('app.current_user_id', true), '')::uuid)
+  WITH CHECK (user_id = NULLIF(current_setting('app.current_user_id', true), '')::uuid);
 
 CREATE POLICY tenant_usage ON usage
-  USING (user_id = current_setting('app.current_user_id', true)::uuid)
-  WITH CHECK (user_id = current_setting('app.current_user_id', true)::uuid);
+  USING (user_id = NULLIF(current_setting('app.current_user_id', true), '')::uuid)
+  WITH CHECK (user_id = NULLIF(current_setting('app.current_user_id', true), '')::uuid);
 
 CREATE POLICY tenant_cv_ingestions ON cv_ingestions
-  USING (user_id = current_setting('app.current_user_id', true)::uuid)
-  WITH CHECK (user_id = current_setting('app.current_user_id', true)::uuid);
+  USING (user_id = NULLIF(current_setting('app.current_user_id', true), '')::uuid)
+  WITH CHECK (user_id = NULLIF(current_setting('app.current_user_id', true), '')::uuid);
