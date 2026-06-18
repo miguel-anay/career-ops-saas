@@ -30,3 +30,28 @@ export async function evaluate(systemBlocks, userContent) {
     ],
   })
 }
+
+/**
+ * Call Claude to ingest a raw CV into structured cv_markdown + profile_json.
+ *
+ * Same model/limits/caching structure as evaluate(); reuses the client singleton.
+ * Model: claude-sonnet-4-6, max_tokens: 8000, temperature: 0.2
+ *
+ * @param {Array<{type: string, text: string, cache_control: object}>} systemBlocks - System prompt blocks with cache headers
+ * @param {string} userContent - The user message content (raw CV + output contract)
+ * @returns {Promise<import('@anthropic-ai/sdk').Message>}
+ */
+export async function ingestCV(systemBlocks, userContent) {
+  return client.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 8000,
+    temperature: 0.2,
+    system: systemBlocks,
+    messages: [
+      {
+        role: 'user',
+        content: userContent,
+      },
+    ],
+  })
+}

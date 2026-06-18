@@ -22,7 +22,7 @@ function buildCVHtml({ cvMarkdown, profileJson, reportContentMd, blocksJson, job
     profile = {}
   }
 
-  const candidateName = profile.name || profile.full_name || 'Candidate'
+  const candidateName = profile.candidate?.full_name || profile.name || profile.full_name || 'Candidate'
   const overallScore = blocksJson?.blockA?.score
     ? Object.values(blocksJson)
         .filter(b => typeof b === 'object' && b !== null && typeof b.score === 'number')
