@@ -224,7 +224,7 @@ export async function handleIngestCV(job) {
 
 > **`parseIngestResponse` is exported** so the vitest can table-test it directly (go-testing parser-as-pure-function principle applied to JS).
 
-> **Failure path:** if `ingestCV` throws (network/timeout), the job throws and pg-boss retries; `cv_ingestions.status` stays `running`. The `GET /api/cv/ingest/:id` fallback shows `running`. Optionally a `try/catch` could set status `failed` + `notify('ingest.failed')` — recommended as a small addition (see §7 contract). Keep it minimal: one catch that sets `status='failed'` and emits `ingest.failed`, then rethrows for pg-boss retry telemetry.
+> **Failure path:** the job sets `status='processing'` before calling Claude; if `ingestCV` throws (network/timeout), the job throws and pg-boss retries; absent a catch, `cv_ingestions.status` stays `processing`. The `GET /api/cv/ingest/:id` fallback shows `processing`. Recommended small addition: one `try/catch` that sets `status='failed'` + `notify('ingest.failed')` (see §7 contract), then rethrows for pg-boss retry telemetry.
 
 ### 3.2 `worker/lib/ingest-prompt.mjs` — `buildIngestPrompt(rawCV)`
 
@@ -323,12 +323,13 @@ New file `db/migrations/002_ingest_cv.sql` (next sequential number after `001_in
 ```sql
 -- 002_ingest_cv.sql
 
--- reuse scan_status_t? No — ingest has no 'partial'. Use a CHECK constraint instead of a new enum.
+-- reuse scan_status_t? No — ingest has its own lifecycle. Use a CHECK constraint instead of a new enum.
+-- Status lifecycle per spec.md (Req 1-3): pending -> processing -> {completed|failed}.
 CREATE TABLE cv_ingestions (
   id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id     uuid        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  status      text        NOT NULL DEFAULT 'running'
-                            CHECK (status IN ('running','completed','failed')),
+  status      text        NOT NULL DEFAULT 'pending'
+                            CHECK (status IN ('pending','processing','completed','failed')),
   started_at  timestamptz NOT NULL DEFAULT now(),
   finished_at timestamptz
 );

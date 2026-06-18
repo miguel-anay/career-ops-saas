@@ -99,8 +99,9 @@ sqlc regeneration (11 Go packages, all `ok` or no-test-files, zero failures).
      `CREATE EXTENSION pgtap` fails. Pinned to `postgresql-16-pgtap` explicitly.
    - Added an explicit apply of `002_ingest_cv.sql` before running tests (the existing line only re-applies
      `001_initial.sql`).
-   - Split the `pg_prove` invocation: the legacy `rls_test.sql` still runs as `careerops` (unchanged from before —
-     out of scope to redesign), and the new `cv_ingestions_rls.test.sql` runs as `app_user` via a second
+   - Split the `pg_prove` invocation. NOTE (corrected): at Batch 1 time the legacy `rls_test.sql` was left running
+     as `careerops`; this was **subsequently changed in the review-fix batch** (see Blockers → T-84 below) to run as
+     `app_user` so it genuinely exercises RLS. The new `cv_ingestions_rls.test.sql` runs as `app_user` via a second
      `pg_prove` call with `PGPASSWORD=app_pw`.
 
 ## Blockers (Batch 1) — both resolved in Batch 2
