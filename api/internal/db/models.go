@@ -215,6 +215,14 @@ type Cv struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type CvIngestion struct {
+	ID         uuid.UUID    `json:"id"`
+	UserID     uuid.UUID    `json:"user_id"`
+	Status     string       `json:"status"`
+	StartedAt  time.Time    `json:"started_at"`
+	FinishedAt sql.NullTime `json:"finished_at"`
+}
+
 type Job struct {
 	ID             uuid.UUID             `json:"id"`
 	UserID         uuid.UUID             `json:"user_id"`
@@ -254,6 +262,7 @@ type Usage struct {
 	Month            string    `json:"month"`
 	EvaluationsCount int32     `json:"evaluations_count"`
 	PdfsCount        int32     `json:"pdfs_count"`
+	IngestionsCount  int32     `json:"ingestions_count"`
 }
 
 type User struct {

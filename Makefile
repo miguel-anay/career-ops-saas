@@ -15,11 +15,13 @@ test-rls:
 	@echo "Waiting for postgres to be healthy..."
 	@until docker compose exec -T postgres pg_isready -U careerops; do sleep 1; done
 	@echo "Installing pgTAP..."
-	docker compose exec -T postgres bash -c "apt-get update -qq && apt-get install -y -qq pgtap 2>/dev/null || true"
+	docker compose exec -T postgres bash -c "apt-get update -qq && apt-get install -y -qq postgresql-16-pgtap 2>/dev/null || true"
 	@echo "Running RLS tests..."
 	docker compose exec -T postgres psql -U careerops -d careerops -f /docker-entrypoint-initdb.d/001_initial.sql 2>/dev/null || true
-	docker compose run --rm -v $(PWD)/db/tests:/tests postgres psql -U careerops -h postgres -d careerops -c "CREATE EXTENSION IF NOT EXISTS pgtap;" 2>/dev/null || true
-	docker compose run --rm -v $(PWD)/db/tests:/tests postgres pg_prove -U careerops -h postgres -d careerops /tests/rls_test.sql
+	docker compose exec -T postgres psql -U careerops -d careerops -f /docker-entrypoint-initdb.d/002_ingest_cv.sql 2>/dev/null || true
+	docker compose exec -T postgres psql -U careerops -d careerops -c "CREATE EXTENSION IF NOT EXISTS pgtap;" 2>/dev/null || true
+	docker compose exec -T -e PGPASSWORD=app_pw postgres pg_prove -U app_user -d careerops /db/tests/rls_test.sql
+	docker compose exec -T -e PGPASSWORD=app_pw postgres pg_prove -U app_user -d careerops /db/tests/cv_ingestions_rls.test.sql
 	docker compose stop postgres
 
 test-all: test-go test-worker test-web
