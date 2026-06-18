@@ -28,8 +28,8 @@ func (m *MockService) TriggerScan(ctx context.Context, userID uuid.UUID) (uuid.U
 	return args.Get(0).(uuid.UUID), args.Error(1)
 }
 
-func (m *MockService) GetScanRun(ctx context.Context, scanRunID uuid.UUID) (*db.ScanRun, error) {
-	args := m.Called(ctx, scanRunID)
+func (m *MockService) GetScanRun(ctx context.Context, userID, scanRunID uuid.UUID) (*db.ScanRun, error) {
+	args := m.Called(ctx, userID, scanRunID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -119,7 +119,7 @@ func TestGetScanRun_HappyPath(t *testing.T) {
 		},
 		ErrorsJson: json.RawMessage(`[]`),
 	}
-	svc.On("GetScanRun", mock.Anything, scanRunID).Return(scanRun, nil)
+	svc.On("GetScanRun", mock.Anything, userID, scanRunID).Return(scanRun, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/scan-runs/"+scanRunID.String(), nil)
 	ctx := newChiCtx(map[string]string{"id": scanRunID.String()})
@@ -170,7 +170,7 @@ func TestGetScanRun_NotFound(t *testing.T) {
 
 	userID := uuid.New()
 	scanRunID := uuid.New()
-	svc.On("GetScanRun", mock.Anything, scanRunID).Return(nil, sql.ErrNoRows)
+	svc.On("GetScanRun", mock.Anything, userID, scanRunID).Return(nil, sql.ErrNoRows)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/scan-runs/"+scanRunID.String(), nil)
 	ctx := newChiCtx(map[string]string{"id": scanRunID.String()})
@@ -181,5 +181,30 @@ func TestGetScanRun_NotFound(t *testing.T) {
 	h.GetScanRun(rec, req)
 
 	assert.Equal(t, http.StatusNotFound, rec.Code)
+	svc.AssertExpectations(t)
+}
+
+// TestGetScanRun_CrossTenant asserts the handler forwards the caller's user id
+// to the service so cross-tenant lookups can be denied. User B requests user
+// A's scan run by its exact id; the service reports it as not found (404), and
+// the call must carry user B's id (proving userID is no longer discarded).
+func TestGetScanRun_CrossTenant(t *testing.T) {
+	svc := &MockService{}
+	h := scan.NewHandler(svc)
+
+	userB := uuid.New()
+	scanRunID := uuid.New() // a scan run that belongs to user A in production
+	svc.On("GetScanRun", mock.Anything, userB, scanRunID).Return(nil, sql.ErrNoRows)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/scan-runs/"+scanRunID.String(), nil)
+	ctx := newChiCtx(map[string]string{"id": scanRunID.String()})
+	ctx = middleware.SetUserID(ctx, userB)
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	h.GetScanRun(rec, req)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code,
+		"cross-tenant scan_run access must return 404, not reveal the row")
 	svc.AssertExpectations(t)
 }
