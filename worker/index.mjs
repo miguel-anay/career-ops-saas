@@ -4,6 +4,7 @@ import { start, registerWorker } from './lib/queue.mjs'
 import { handleScanCompany } from './jobs/scan.mjs'
 import { handleEvaluateJob } from './jobs/evaluate.mjs'
 import { handleGeneratePDF } from './jobs/pdf.mjs'
+import { handleIngestCV } from './jobs/ingest-cv.mjs'
 
 const PORT = process.env.WORKER_PORT || 3002
 
@@ -30,6 +31,11 @@ async function main() {
     teamSize: 3,
   })
   console.log('[worker] Registered handler: generate-pdf')
+
+  await registerWorker('ingest-cv', handleIngestCV, {
+    teamSize: 5,
+  })
+  console.log('[worker] Registered handler: ingest-cv')
 
   // Express health endpoint
   const app = express()
