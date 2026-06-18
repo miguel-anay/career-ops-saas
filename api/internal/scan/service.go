@@ -2,6 +2,7 @@ package scan
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 
@@ -74,12 +75,19 @@ func (s *Service) TriggerScan(ctx context.Context, userID uuid.UUID) (uuid.UUID,
 	return scanRun.ID, nil
 }
 
-// GetScanRun returns the scan_run record by ID.
-func (s *Service) GetScanRun(ctx context.Context, scanRunID uuid.UUID) (*db.ScanRun, error) {
+// GetScanRun returns the scan_run record by ID, scoped to the requesting user.
+// A scan_run owned by another tenant is reported as not found (sql.ErrNoRows)
+// so its existence is never revealed cross-tenant. This app-layer ownership
+// check is defense-in-depth; the DB-level RLS gate is wired separately in the
+// rls-tenancy-wiring change.
+func (s *Service) GetScanRun(ctx context.Context, userID, scanRunID uuid.UUID) (*db.ScanRun, error) {
 	q := s.queries()
 	scanRun, err := q.GetScanRunByID(ctx, scanRunID)
 	if err != nil {
 		return nil, fmt.Errorf("get scan_run: %w", err)
+	}
+	if scanRun.UserID != userID {
+		return nil, sql.ErrNoRows
 	}
 	return &scanRun, nil
 }

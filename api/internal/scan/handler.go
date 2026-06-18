@@ -16,7 +16,7 @@ import (
 // Servicer is the interface that handlers depend on.
 type Servicer interface {
 	TriggerScan(ctx context.Context, userID uuid.UUID) (uuid.UUID, error)
-	GetScanRun(ctx context.Context, scanRunID uuid.UUID) (*db.ScanRun, error)
+	GetScanRun(ctx context.Context, userID, scanRunID uuid.UUID) (*db.ScanRun, error)
 }
 
 // Handler holds dependencies for scan HTTP handlers.
@@ -56,7 +56,7 @@ func (h *Handler) TriggerScan(w http.ResponseWriter, r *http.Request) {
 
 // GetScanRun handles GET /api/scan-runs/{id}
 func (h *Handler) GetScanRun(w http.ResponseWriter, r *http.Request) {
-	_, ok := middleware.GetUserID(r.Context())
+	userID, ok := middleware.GetUserID(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "missing_user_id")
 		return
@@ -69,7 +69,7 @@ func (h *Handler) GetScanRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	scanRun, err := h.svc.GetScanRun(r.Context(), scanRunID)
+	scanRun, err := h.svc.GetScanRun(r.Context(), userID, scanRunID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "scan run not found", "not_found")
