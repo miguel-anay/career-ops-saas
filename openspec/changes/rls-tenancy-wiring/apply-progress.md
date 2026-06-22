@@ -1,9 +1,9 @@
 # Apply Progress — `rls-tenancy-wiring`
 
-> Phase: apply · Status: Seam 1 (foundation) complete, Seam 2 (`scan`) complete, Seam 3 (`tracker`) complete, Seam 4 (`auth`) complete, Seams 5-8 not started
-> Branch: `feat/rls-foundation` (Seam 1) → `feat/rls-scan` (Seam 2, based on `main` including Seam 1's foundation) → `feat/rls-tracker` (Seam 3, based on `main` including Seam 1's foundation AND Seam 2's `scan` slice) → `feat/rls-auth` (Seam 4, based on `main` including Seam 1+2+3)
+> Phase: apply · Status: Seam 1 (foundation) complete, Seam 2 (`scan`) complete, Seam 3 (`tracker`) complete, Seam 4 (`auth`) complete, Seam 5 (`jobs`) complete, Seams 6-8 not started
+> Branch: `feat/rls-foundation` (Seam 1) → `feat/rls-scan` (Seam 2, based on `main` including Seam 1's foundation) → `feat/rls-tracker` (Seam 3, based on `main` including Seam 1's foundation AND Seam 2's `scan` slice) → `feat/rls-auth` (Seam 4, based on `main` including Seam 1+2+3) → `feat/rls-jobs` (Seam 5, based on `main` including Seam 1+2+3+4)
 > Mode: Strict TDD (test runner: `make test-all` / `cd api && go test ./... -count=1`; `make test-rls` for pgTAP)
-> Batch: 4 of N (Seam 4 — `auth` slice)
+> Batch: 5 of N (Seam 5 — `jobs` slice)
 
 ## Seam 0 — Live-DB spike (D9) — already done before this batch
 
@@ -275,6 +275,69 @@ RED confirmed before T-138: writing the test first against the old 3-arg `GetUse
 - [x] Seam 3 (`tracker`) — T-134..T-136
 - [x] Seam 4 (`auth`) — T-137..T-139
 - [ ] Seam 5 (`jobs`) — T-140..T-142
+- [ ] Seam 6 (`evaluate`) — T-143..T-145
+- [ ] Seam 7 (`companies`) — T-146..T-148
+- [ ] Seam 8 (`cv` remaining 5 methods) — T-149..T-152
+- [ ] Seam 9 (cross-seam final verification) — T-153..T-156
+
+---
+
+## Seam 5 — `jobs` slice: `AddManual` / `List` / `GetByID` + repo-from-tx (T-140..T-142, complete, this batch, branch `feat/rls-jobs` based on `main` post-Seam-1/2/3/4)
+
+### TDD Cycle Evidence
+
+| Task | RED | GREEN | REFACTOR |
+|------|-----|-------|----------|
+| T-140/T-141 (`jobs.Service.AddManual`/`List`/`GetByID` wired to `platform.WithTenantTx` + `newRepoFromQueries`) | Wrote `api/internal/jobs/rls_integration_test.go` using the `rlsdb` harness BEFORE wiring the service. Ran against a live NULLIF-migrated DB (`docker compose up -d postgres`) with `TEST_DATABASE_URL` set — confirmed RED: the owner's own `AddManual` call failed with `ERROR: new row violates row-level security policy for table "jobs" (SQLSTATE 42501)`, because `s.repo()` built a `Repo` over the raw pool with no `app.current_user_id` GUC set, so the `WITH CHECK` clause on the INSERT denied even the owner's own write | Added `newRepoFromQueries(q *db.Queries) *Repo` to `jobs/repo.go` (replacing `NewRepo(pool)` and `newRepoFromSQL(sqlDB)` — both deleted, confirmed zero other callers via grep before deletion). Wired `AddManual`/`List`/`GetByID` in `jobs/service.go` to build the `Repo` from inside `platform.WithTenantTx(ctx, s.pool, userID, fn)`'s closure instead of `s.repo()` over the raw pool; deleted the now-dead `s.repo()` method and its `pgx/v5/stdlib` import, added `platform` import. `GetByID` keeps its post-lookup `if job.UserID != userID` check as defense-in-depth (consistent with `scan.GetScanRun`'s kept pattern, not `tracker`'s D8 drop-it pattern — `jobs.GetByID` is a pure read with no WITH-CHECK mutation risk, so the design's per-domain table does not call for removing it). Re-ran the same test — all 3 subtests PASS | n/a — straight wiring, mirrors the `scan`/`auth` precedent (build `*db.Queries`-backed `Repo` inside the tx closure, capture the result via an outer variable, return it after `WithTenantTx` returns) |
+| T-142 (verify) | n/a | `cd api && go test ./internal/jobs/... -count=1` against the live DB: 21/21 test functions pass (20 pre-existing — `TestDetectPlatform` table-driven + 10 mock-based `handler_test.go` tests + the pre-existing app-layer cross-tenant tests `TestUserBCannotReadUserAJob`/`TestUserBCannotListUserAJobs`/`TestCrossTenantJobAccess_DirectUUID`/`TestAuthenticatedUserCanReadOwnJob` — all unmodified, plus the new `TestJobsRLS_Integration` with 3 subtests). Confirmed clean skip without `TEST_DATABASE_URL` (`SKIP: TestJobsRLS_Integration`). Ran `go build ./...`, `go vet ./...` (both clean), and the full repo `go test ./... -count=1` (no `TEST_DATABASE_URL`) — all 13 testable packages green | n/a |
+
+### Files changed
+
+| File | Action | What was done |
+|------|--------|----------------|
+| `api/internal/jobs/rls_integration_test.go` | Created | `TestJobsRLS_Integration` using the `rlsdb` harness: seeds users A and B, A adds a job via `svc.AddManual`, asserts B's `GetByID(jobA.ID)` returns `jobs.ErrNotFound`, asserts B's `List` never includes A's job, asserts A's own `GetByID`/`List`/`AddManual` (second job) all still succeed and A's `List` returns exactly A's own job(s). |
+| `api/internal/jobs/repo.go` | Modified | Deleted `NewRepo(pool *pgxpool.Pool) *Repo` (zero callers anywhere, grep-confirmed) and `newRepoFromSQL(sqlDB *sql.DB) *Repo` (exactly one caller — the now-deleted `s.repo()` — grep-confirmed). Added `newRepoFromQueries(q *db.Queries) *Repo` — the sole constructor now, taking an already tenant-scoped `*db.Queries` produced inside `platform.WithTenantTx`'s closure. Dropped the now-unused `database/sql`, `pgx/v5/stdlib`, `pgx/v5/pgxpool` imports. |
+| `api/internal/jobs/service.go` | Modified | Deleted the `s.repo()` method (built a raw-pool `Repo` via `stdlib.OpenDBFromPool` — no GUC scoping). `AddManual`, `List`, `GetByID` now each wrap their repo call in `platform.WithTenantTx(ctx, s.pool, userID, fn)`, building `newRepoFromQueries(q)` inside the closure and capturing the result via an outer variable. Dropped the now-unused `pgx/v5/stdlib` import; added `platform` import. `GetByID`'s post-lookup ownership recheck is kept as defense-in-depth (unchanged from before, consistent with `scan`). |
+
+### Deviations from design
+
+None — implementation matches `design.md` §1.3 ("`jobs` (Repo indirection)" bullet — add `newRepoFromQueries`, build the `Repo` from the tx, remove `NewRepo`/`newRepoFromSQL` if unused) and §2's `jobs` rows in the per-domain table (`AddManual`/`List`/`GetByID` all move inside the tenant tx; `GetByID`'s ownership recheck explicitly noted as "recommend keep one line as defense-in-depth, consistent with scan") exactly.
+
+Grep evidence for the dead-constructor removal, run before deleting:
+```
+rg -n "jobs\.NewRepo|newRepoFromSQL|jobs\.Repo\{" --type go .
+```
+Result: `newRepoFromSQL` had exactly one call site (`jobs/service.go`'s `s.repo()`, itself removed in this same change); `jobs.NewRepo`/`NewRepo(pool)` had zero call sites anywhere in the tree (not even in tests). Both were safe to delete outright — no other caller remained.
+
+### Issues found
+
+None. Confirmed the same RED pattern as Seam 2/3 (Seam 5's RED was the owner's own write being denied by RLS over the unscoped raw pool, not a cross-tenant leak being silently allowed) — this is expected and consistent: every prior service slice's pre-wiring state denies everything (including the owner) once a live NULLIF-migrated DB is in play, because `WITH CHECK`/`USING` require a properly-set GUC that the raw pool never sets. The cross-tenant assertions in this test would have passed even in RED, for the "wrong" reason (no GUC at all rather than a correctly-scoped denial) — same caveat already logged in Seam 2 and Seam 3's progress notes.
+
+### Workload / PR boundary
+
+- Mode: chained PR slice (`stacked-to-main`)
+- Current work unit: PR-5 — `jobs` slice (Seam 5 only, T-140..T-142)
+- Boundary: starts from `main` (post-Seam-1/2/3/4 merge) on branch `feat/rls-jobs`; ends at a fully compiling, fully-passing state with `jobs.AddManual`/`List`/`GetByID` wired through `platform.WithTenantTx` + `newRepoFromQueries`, the dead raw-pool `Repo` constructors removed, the new integration test passing against a live NULLIF-migrated DB, and zero changes to any other domain (`auth`, `scan`, `tracker`, `evaluate`, `companies`, `cv` untouched, per scope)
+- Estimated review budget impact: ~90 hand-written lines per the Review Workload Forecast in `tasks.md` (service+repo ~40, integration test ~50) — well under the 400-line budget, independent of every other seam
+
+### Test results
+
+`cd api && go test ./internal/jobs/... -count=1 -v` (with `TEST_DATABASE_URL` set against the live docker-compose `postgres` service, migrated through `003_rls_nullif.sql`): **21/21 test functions pass** — 10 `TestDetectPlatform` table-driven subtests, 10 pre-existing mock-based `handler_test.go` tests (`TestList_*`, `TestCreate_*`, `TestGetByID_*`, `TestUserBCannotReadUserAJob`, `TestUserBCannotListUserAJobs`, `TestCrossTenantJobAccess_DirectUUID`, `TestAuthenticatedUserCanReadOwnJob`, `TestUnauthenticatedRequestReturns401_GetByID`, `TestUnauthenticatedRequestReturns401_List`) unmodified and green, plus the new `TestJobsRLS_Integration` (3 subtests: non-owner `GetByID` denial, non-owner `List` exclusion, owner `GetByID`/`List`/`AddManual` success) green. Without `TEST_DATABASE_URL` set, the integration test skips cleanly (`SKIP: TestJobsRLS_Integration`) and the rest of the suite (full repo `go test ./... -count=1`) stays green across all 13 testable packages (`auth`, `companies`, `cv`, `evaluate`, `jobs`, `middleware`, `platform`, `scan`, `testsupport/rlsdb`, `tracker`, `ws`).
+
+RED confirmed before T-141: running the test first against the OLD `s.repo()`-over-raw-pool implementation produced a runtime RED against the live DB — `upsert job: ERROR: new row violates row-level security policy for table "jobs" (SQLSTATE 42501)` on the owner's own `AddManual` call, proving the pre-wiring code does not engage RLS correctly (it denies everyone, including the owner, rather than scoping by tenant) — before the `WithTenantTx` wiring in T-141 made the test pass.
+
+### Status
+
+3/3 Seam 5 tasks complete (T-140, T-141, T-142). Cumulative: 23/25 tasks across Seams 1-5 complete (T-122 and T-130's `make test-rls` pgTAP portions remain deferred to the orchestrator's live pgTAP run, as in prior batches). Ready for verify, then ready for Seam 6-8 `sdd-apply` batches (parallelizable, any order, all depend only on Seam 1).
+
+### Remaining tasks (cumulative, as of end of Seam 5)
+
+- [ ] T-122 — full `make test-rls` pgTAP suite against a live DB (orchestrator). Still not run (deferred since Seam 1/2; out of scope for Seam 3/4/5 as well)
+- [ ] T-130's `make test-rls` portion — same as above, not run in this batch
+- [x] Seam 2 (`scan`) — T-131..T-133
+- [x] Seam 3 (`tracker`) — T-134..T-136
+- [x] Seam 4 (`auth`) — T-137..T-139
+- [x] Seam 5 (`jobs`) — T-140..T-142
 - [ ] Seam 6 (`evaluate`) — T-143..T-145
 - [ ] Seam 7 (`companies`) — T-146..T-148
 - [ ] Seam 8 (`cv` remaining 5 methods) — T-149..T-152

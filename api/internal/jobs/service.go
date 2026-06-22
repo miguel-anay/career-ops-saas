@@ -10,8 +10,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/miguel-anay/career-ops-saas/api/internal/db"
+	"github.com/miguel-anay/career-ops-saas/api/internal/platform"
 )
 
 // ErrNotFound is returned when a requested resource does not exist or
@@ -28,13 +28,6 @@ func NewService(pool *pgxpool.Pool) *Service {
 	return &Service{pool: pool}
 }
 
-// repo returns a new Repo backed by a tenant-wrapped *sql.DB.
-// The pool is wrapped via stdlib so sqlc's database/sql DBTX interface is satisfied.
-func (s *Service) repo() *Repo {
-	sqlDB := stdlib.OpenDBFromPool(s.pool)
-	return newRepoFromSQL(sqlDB)
-}
-
 // AddManual validates a URL, detects the platform, and upserts the job for the user.
 func (s *Service) AddManual(ctx context.Context, userID uuid.UUID, rawURL string) (*db.Job, error) {
 	if !strings.HasPrefix(rawURL, "https://") {
@@ -46,21 +39,29 @@ func (s *Service) AddManual(ctx context.Context, userID uuid.UUID, rawURL string
 		return nil, fmt.Errorf("invalid URL: %w", err)
 	}
 
-	platform := detectPlatform(parsed.Hostname())
+	platformID := detectPlatform(parsed.Hostname())
 
-	r := s.repo()
-	job, err := r.UpsertByURL(ctx, db.UpsertJobByURLParams{
-		UserID:  userID,
-		Title:   "Pending",
-		Company: "Unknown",
-		Url:     rawURL,
-		Platform: sql.NullString{
-			String: platform,
-			Valid:  platform != "unknown",
-		},
-		Status:         db.JobStatusTNew,
-		ScrapedContent: sql.NullString{},
-		ReceivedAt:     sql.NullTime{},
+	var job db.Job
+	err = platform.WithTenantTx(ctx, s.pool, userID, func(q *db.Queries) error {
+		r := newRepoFromQueries(q)
+		j, err := r.UpsertByURL(ctx, db.UpsertJobByURLParams{
+			UserID:  userID,
+			Title:   "Pending",
+			Company: "Unknown",
+			Url:     rawURL,
+			Platform: sql.NullString{
+				String: platformID,
+				Valid:  platformID != "unknown",
+			},
+			Status:         db.JobStatusTNew,
+			ScrapedContent: sql.NullString{},
+			ReceivedAt:     sql.NullTime{},
+		})
+		if err != nil {
+			return err
+		}
+		job = j
+		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("upsert job: %w", err)
@@ -70,22 +71,43 @@ func (s *Service) AddManual(ctx context.Context, userID uuid.UUID, rawURL string
 
 // List returns a paginated list of jobs for the given user.
 func (s *Service) List(ctx context.Context, userID uuid.UUID, page, limit int) ([]db.Job, error) {
-	r := s.repo()
-	return r.ListByUser(ctx, userID, page, limit)
+	var jobsList []db.Job
+	err := platform.WithTenantTx(ctx, s.pool, userID, func(q *db.Queries) error {
+		r := newRepoFromQueries(q)
+		l, err := r.ListByUser(ctx, userID, page, limit)
+		if err != nil {
+			return err
+		}
+		jobsList = l
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return jobsList, nil
 }
 
 // GetByID returns the job for the user. Returns ErrNotFound if the job belongs
 // to a different user (RLS enforces this at the DB level; we return a clean error).
 func (s *Service) GetByID(ctx context.Context, userID uuid.UUID, jobID uuid.UUID) (*db.Job, error) {
-	r := s.repo()
-	job, err := r.GetByID(ctx, jobID)
+	var job db.Job
+	err := platform.WithTenantTx(ctx, s.pool, userID, func(q *db.Queries) error {
+		r := newRepoFromQueries(q)
+		j, err := r.GetByID(ctx, jobID)
+		if err != nil {
+			return err
+		}
+		job = j
+		return nil
+	})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("get job: %w", err)
 	}
-	// Double-check ownership even though RLS handles it.
+	// Double-check ownership even though RLS handles it (defense-in-depth,
+	// consistent with scan.GetScanRun's kept app-layer check).
 	if job.UserID != userID {
 		return nil, ErrNotFound
 	}
