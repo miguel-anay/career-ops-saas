@@ -1,9 +1,9 @@
 # Apply Progress — `rls-tenancy-wiring`
 
-> Phase: apply · Status: Seam 1 (foundation) complete, Seam 2 (`scan`) complete, Seam 3 (`tracker`) complete, Seam 4 (`auth`) complete, Seam 5 (`jobs`) complete, Seam 6 (`evaluate`) complete, Seams 7-8 not started
-> Branch: `feat/rls-foundation` (Seam 1) → `feat/rls-scan` (Seam 2, based on `main` including Seam 1's foundation) → `feat/rls-tracker` (Seam 3, based on `main` including Seam 1's foundation AND Seam 2's `scan` slice) → `feat/rls-auth` (Seam 4, based on `main` including Seam 1+2+3) → `feat/rls-jobs` (Seam 5, based on `main` including Seam 1+2+3+4) → `feat/rls-evaluate` (Seam 6, based on `main` including Seam 1+2+3+4+5)
+> Phase: apply · Status: Seam 1 (foundation) complete, Seam 2 (`scan`) complete, Seam 3 (`tracker`) complete, Seam 4 (`auth`) complete, Seam 5 (`jobs`) complete, Seam 6 (`evaluate`) complete, Seam 7 (`companies`) complete, Seam 8 not started
+> Branch: `feat/rls-foundation` (Seam 1) → `feat/rls-scan` (Seam 2, based on `main` including Seam 1's foundation) → `feat/rls-tracker` (Seam 3, based on `main` including Seam 1's foundation AND Seam 2's `scan` slice) → `feat/rls-auth` (Seam 4, based on `main` including Seam 1+2+3) → `feat/rls-jobs` (Seam 5, based on `main` including Seam 1+2+3+4) → `feat/rls-evaluate` (Seam 6, based on `main` including Seam 1+2+3+4+5) → `feat/rls-companies` (Seam 7, based on `main` including Seam 1+2+3+4+5+6)
 > Mode: Strict TDD (test runner: `make test-all` / `cd api && go test ./... -count=1`; `make test-rls` for pgTAP)
-> Batch: 6 of N (Seam 6 — `evaluate` slice)
+> Batch: 7 of N (Seam 7 — `companies` slice)
 
 ## Seam 0 — Live-DB spike (D9) — already done before this batch
 
@@ -399,6 +399,93 @@ RED confirmed before T-144: running the test first against the OLD `s.queries()`
 - [x] Seam 4 (`auth`) — T-137..T-139
 - [x] Seam 5 (`jobs`) — T-140..T-142
 - [x] Seam 6 (`evaluate`) — T-143..T-145
-- [ ] Seam 7 (`companies`) — T-146..T-148
+- [x] Seam 7 (`companies`) — T-146..T-148
+- [ ] Seam 8 (`cv` remaining 5 methods) — T-149..T-152
+- [ ] Seam 9 (cross-seam final verification) — T-153..T-156
+
+---
+
+## Seam 7 — `companies` slice: `List`/`Add`/`Remove` (T-146..T-148, complete, this batch, branch `feat/rls-companies` based on `main` post-Seam-1/2/3/4/5/6)
+
+### TDD Cycle Evidence
+
+| Task | RED | GREEN | REFACTOR |
+|------|-----|-------|----------|
+| T-146/T-147 (`companies.Service.List`/`Add`/`Remove` wired to `platform.WithTenantTx`) | Wrote `api/internal/companies/rls_integration_test.go` using the `rlsdb` harness BEFORE wiring the service. Seeded `watched_companies` rows for A and B directly via `AdminPool` raw SQL. Ran against the live NULLIF-migrated DB (`docker exec`-confirmed `tenant_watched_companies` policy already carries the `NULLIF(...)::uuid` form) with `TEST_DATABASE_URL` set — confirmed RED: the owner's own `List` subtest failed (`"[]" should have 1 item(s), but has 0`) and the owner's own `Add` subtest failed with `ERROR: new row violates row-level security policy for table "watched_companies" (SQLSTATE 42501)`, because `List`/`Add` ran over `s.queries()` (raw pool, no `app.current_user_id` GUC set) — RLS denied the owner's own reads/writes too. The cross-tenant `Remove` subtest passed even in RED, by accident (no GUC at all, not a correctly-scoped denial) — same caveat as every prior seam | Deleted `s.queries()` (raw-pool helper via `stdlib.OpenDBFromPool`); dropped its now-unused `pgx/v5/stdlib` import; added `platform` import. Wired `List`'s `ListWatchedCompaniesByUser` call and `Add`'s `InsertWatchedCompany` call each inside their own `platform.WithTenantTx(ctx, s.pool, userID, fn)` closure. Wired `Remove`'s `GetWatchedCompanyByID` + `DeleteWatchedCompany` inside ONE `platform.WithTenantTx` closure (the highest-severity item in this seam: `DeleteWatchedCompany` has no `WHERE user_id` clause in the sqlc query at all, so RLS is the ONLY guard — both statements must share the identical GUC-scoped tx, which they do, since both calls are made on the same `q *db.Queries` parameter passed into the one closure). Kept the pre-delete ownership recheck (`company.UserID != userID`) as a redundant-but-safe backstop, per design.md §2's explicit note for `companies.Remove`. Re-ran the same test — all 3 subtests PASS | One refactor needed mid-cycle: the first GREEN run still failed on the `List` subtest with a count mismatch (2 rows instead of 1) because `SeedUser` upserts the same user across repeated test runs but the test re-`INSERT`ed a fresh `watched_companies` row each run, accumulating stale fixtures from prior runs. Fixed by adding a `DELETE FROM watched_companies WHERE user_id IN ($1, $2)` cleanup via `AdminPool` immediately after seeding the users, before inserting fresh fixtures — makes the test idempotent across repeated runs against the same persistent DB, matching the re-run safety pattern already used by `tracker`'s and `evaluate`'s integration tests (UUID-suffixed URLs) but solved here via explicit cleanup since `watched_companies` has no unique constraint to dedupe against |
+| T-148 (verify) | n/a | `cd api && go test ./internal/companies/... -count=1` against the live DB: 10/10 test functions pass (9 pre-existing — `TestDetectProvider` table-driven (10 subtests) + `TestList_HappyPath`/`TestList_MissingAuth`/`TestList_ServiceError`/`TestCreate_HappyPath`/`TestCreate_MissingAuth`/`TestCreate_MissingName`/`TestDelete_HappyPath`/`TestDelete_NotFound`/`TestDelete_MissingAuth` — all unmodified, plus the new `TestCompaniesRLS_Integration` with 3 subtests). Re-ran 2x in isolation for stability — both green. Confirmed clean skip without `TEST_DATABASE_URL` (`SKIP: TestCompaniesRLS_Integration`). Ran `go build ./...`, `go vet ./...` (both clean), and the full repo `go test ./... -count=1` (no `TEST_DATABASE_URL`) — all 13 testable packages green | n/a |
+
+### Files changed
+
+| File | Action | What was done |
+|------|--------|----------------|
+| `api/internal/companies/rls_integration_test.go` | Created | `TestCompaniesRLS_Integration` using the `rlsdb` harness: seeds users A and B, clears any stale `watched_companies` fixtures for A/B via `AdminPool` (re-run safety, since `SeedUser` upserts the same user across runs but this domain has no unique constraint to dedupe inserts against), seeds one `watched_companies` row for each via `AdminPool`, asserts B's `List` returns exactly B's company and never A's, asserts B's `Remove(A's companyID)` returns an error and A's row is verified still present via `AdminPool` afterward, asserts A's own `Add` (a second company)/`List`/`Remove` (the first company) all still succeed and A's `List` never includes B's company. |
+| `api/internal/companies/service.go` | Modified | Deleted `s.queries()` (built a raw-pool `*db.Queries` via `stdlib.OpenDBFromPool` — no GUC scoping); dropped the now-unused `pgx/v5/stdlib` import; added `platform` import. `List`'s `ListWatchedCompaniesByUser` call and `Add`'s `InsertWatchedCompany` call each now run inside their own `platform.WithTenantTx(ctx, s.pool, userID, fn)` closure. `Remove`'s `GetWatchedCompanyByID` + `DeleteWatchedCompany` now run inside ONE `platform.WithTenantTx` closure — both statements operate on the same tenant-scoped `*db.Queries` parameter, so they share the identical GUC-scoped transaction; the pre-delete `company.UserID != userID` ownership recheck is kept as a backstop. |
+
+### Confirmation: `GetWatchedCompanyByID` + `DeleteWatchedCompany` share one tenant tx
+
+```go
+func (s *Service) Remove(ctx context.Context, userID uuid.UUID, companyID uuid.UUID) error {
+	err := platform.WithTenantTx(ctx, s.pool, userID, func(q *db.Queries) error {
+		// Verify ownership before deletion (RLS handles it but we return clean error).
+		company, err := q.GetWatchedCompanyByID(ctx, companyID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("get company: %w", err)
+		}
+		if company.UserID != userID {
+			return ErrNotFound
+		}
+
+		if err := q.DeleteWatchedCompany(ctx, companyID); err != nil {
+			return fmt.Errorf("delete company: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+```
+
+Both `q.GetWatchedCompanyByID` and `q.DeleteWatchedCompany` are called on the exact same `q *db.Queries` parameter, inside the single closure passed to one `platform.WithTenantTx` call — they run on the same `*sql.Tx` with `app.current_user_id` set once via `set_config(..., true)` for the duration of that transaction. There is no possibility of the SELECT and the DELETE running under different GUC values or different connections.
+
+### Deviations from design
+
+None — implementation matches `design.md` §2's `companies` rows in the per-domain method-by-method table exactly: `List` and `Add` each wrap their single sqlc call in `WithTenantTx`; `Remove`'s `GetWatchedCompanyByID` + `DeleteWatchedCompany` run inside ONE tenant tx (explicitly called out in design.md as the highest-severity item in this seam, since `DeleteWatchedCompany` has no app-layer `WHERE user_id`); the pre-delete ownership check is kept as backstop, consistent with design.md's note for this method.
+
+### Issues found
+
+None new. Confirmed the same RED pattern as every prior seam (Seam 2/3/5/6): the owner's own `List`/`Add` calls were denied by RLS over the unscoped raw pool before wiring, not a cross-tenant leak slipping through — the cross-tenant `Remove` assertion would have passed even in RED, for the "wrong" reason (no GUC at all, not a correctly-scoped denial). One new (companies-specific) test-infra wrinkle, not present in prior seams: `watched_companies` has no unique constraint analogous to `jobs_user_id_url_key`, so re-running the integration test against a persistent DB without a `DELETE`-based cleanup step accumulates duplicate fixture rows across runs and breaks the exact-count `List` assertions — fixed via an explicit `DELETE FROM watched_companies WHERE user_id IN (...)` immediately after seeding users, before seeding fresh fixtures.
+
+### Workload / PR boundary
+
+- Mode: chained PR slice (`stacked-to-main`)
+- Current work unit: PR-7 — `companies` slice (Seam 7 only, T-146..T-148)
+- Boundary: starts from `main` (post-Seam-1/2/3/4/5/6 merge) on branch `feat/rls-companies`; ends at a fully compiling, fully-passing state with `companies.List`/`Add`/`Remove` wired through `platform.WithTenantTx` (Remove's two statements sharing one tenant tx), the new integration test passing against a live NULLIF-migrated DB, and zero changes to any other domain (`auth`, `scan`, `tracker`, `jobs`, `evaluate`, `cv` untouched, per scope)
+- Estimated review budget impact: ~85 hand-written lines per the Review Workload Forecast in `tasks.md` (service ~30, integration test ~55) — well under the 400-line budget, independent of every other seam
+
+### Test results
+
+`cd api && go test ./internal/companies/... -count=1 -v` (with `TEST_DATABASE_URL` set against the live docker-compose `postgres` service, migrated through `003_rls_nullif.sql`, confirmed live via `docker exec ... psql ... \dp watched_companies` showing the NULLIF-form policy): **10/10 test functions pass** — 9 pre-existing mock-based `handler_test.go`/unit tests (`TestDetectProvider` 10 subtests, `TestList_HappyPath`, `TestList_MissingAuth`, `TestList_ServiceError`, `TestCreate_HappyPath`, `TestCreate_MissingAuth`, `TestCreate_MissingName`, `TestDelete_HappyPath`, `TestDelete_NotFound`, `TestDelete_MissingAuth`) unmodified and green, plus the new `TestCompaniesRLS_Integration` (3 subtests: cross-tenant `List` isolation, cross-tenant `Remove` denial with AdminPool-verified persistence, owner `Add`/`List`/`Remove` success) green. Without `TEST_DATABASE_URL` set, the integration test skips cleanly (`SKIP: TestCompaniesRLS_Integration`) and the rest of the suite (full repo `go test ./... -count=1`) stays green across all 13 testable packages (`auth`, `companies`, `cv`, `evaluate`, `jobs`, `middleware`, `platform`, `scan`, `testsupport/rlsdb`, `tracker`, `ws`).
+
+RED confirmed before T-147: running the test first against the OLD `s.queries()`-over-raw-pool implementation produced a runtime RED against the live DB — the owner's own `List` subtest failed with a 0-vs-1 count mismatch and the owner's own `Add` subtest (inside the third subtest) failed with `ERROR: new row violates row-level security policy for table "watched_companies" (SQLSTATE 42501)`, proving the pre-wiring code does not engage RLS correctly (it denies everyone, including the owner, rather than scoping by tenant) — before the `WithTenantTx` wiring in T-147 made the test pass. `go build ./...` and `go vet ./...` were clean both before and after, since the RED was a runtime/live-DB failure, not a compile failure.
+
+### Status
+
+3/3 Seam 7 tasks complete (T-146, T-147, T-148). Cumulative: 29/31 tasks across Seams 1-7 complete (T-122 and T-130's `make test-rls` pgTAP portions remain deferred to the orchestrator's live pgTAP run, as in prior batches). Ready for verify, then ready for Seam 8 `sdd-apply` batch (depends only on Seam 1).
+
+### Remaining tasks (cumulative, as of end of Seam 7)
+
+- [ ] T-122 — full `make test-rls` pgTAP suite against a live DB (orchestrator). Still not run (deferred since Seam 1/2; out of scope for Seam 3/4/5/6/7 as well)
+- [ ] T-130's `make test-rls` portion — same as above, not run in this batch
+- [x] Seam 2 (`scan`) — T-131..T-133
+- [x] Seam 3 (`tracker`) — T-134..T-136
+- [x] Seam 4 (`auth`) — T-137..T-139
+- [x] Seam 5 (`jobs`) — T-140..T-142
+- [x] Seam 6 (`evaluate`) — T-143..T-145
+- [x] Seam 7 (`companies`) — T-146..T-148
 - [ ] Seam 8 (`cv` remaining 5 methods) — T-149..T-152
 - [ ] Seam 9 (cross-seam final verification) — T-153..T-156
