@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/miguel-anay/career-ops-saas/api/internal/cv"
 	"github.com/miguel-anay/career-ops-saas/api/internal/platform"
+	"github.com/miguel-anay/career-ops-saas/api/internal/testsupport/rlsdb"
 	"github.com/stretchr/testify/require"
 )
 
@@ -155,24 +156,17 @@ func TestCVIngest_RLS_Integration(t *testing.T) {
 // ensurePgbossStandin creates a minimal pgboss.job table matching the columns
 // queue.Enqueue inserts, and grants app_user INSERT, so the enqueue path runs
 // against a bare migrated DB. The real schema is created by the pg-boss runtime.
+//
+// Delegates to rlsdb.EnsurePgbossStandin (the same DDL, behind a
+// pg_advisory_xact_lock) rather than running this duplicate inline copy
+// directly. This file predates the shared testsupport/rlsdb harness
+// (it's from the ingest-cv change); a second, lock-free copy of the same
+// "CREATE SCHEMA/TABLE IF NOT EXISTS" DDL racing against the harness's
+// locked copy from other packages caused intermittent
+// "tuple concurrently updated" failures when test packages ran in parallel.
 func ensurePgbossStandin(ctx context.Context, t *testing.T, admin *pgxpool.Pool) {
 	t.Helper()
-	const ddl = `
-		CREATE SCHEMA IF NOT EXISTS pgboss;
-		CREATE TABLE IF NOT EXISTS pgboss.job (
-			id          uuid PRIMARY KEY,
-			name        text NOT NULL,
-			data        jsonb,
-			state       text NOT NULL DEFAULT 'created',
-			"createdOn" timestamptz NOT NULL DEFAULT now(),
-			"startAfter" timestamptz NOT NULL DEFAULT now(),
-			"expireIn"  interval NOT NULL DEFAULT interval '15 minutes',
-			priority    integer NOT NULL DEFAULT 0
-		);
-		GRANT USAGE ON SCHEMA pgboss TO app_user;
-		GRANT INSERT, SELECT ON pgboss.job TO app_user;`
-	_, err := admin.Exec(ctx, ddl)
-	require.NoError(t, err, "create pgboss stand-in schema")
+	(&rlsdb.Harness{AdminPool: admin}).EnsurePgbossStandin(ctx, t)
 }
 
 // mustUpsertUser seeds a real user row via the auth_upsert_user SECURITY
