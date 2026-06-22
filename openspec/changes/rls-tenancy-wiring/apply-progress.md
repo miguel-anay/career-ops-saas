@@ -1,9 +1,9 @@
 # Apply Progress — `rls-tenancy-wiring`
 
-> Phase: apply · Status: Seam 1 (foundation) complete, Seams 2-8 not started
-> Branch: `feat/rls-foundation` (created fresh from `main`)
+> Phase: apply · Status: Seam 1 (foundation) complete, Seam 2 (`scan`) complete, Seams 3-8 not started
+> Branch: `feat/rls-foundation` (Seam 1) → `feat/rls-scan` (Seam 2, based on `main` including Seam 1's foundation)
 > Mode: Strict TDD (test runner: `make test-all` / `cd api && go test ./... -count=1`; `make test-rls` for pgTAP)
-> Batch: 1 of N (first apply for this change)
+> Batch: 2 of N (Seam 2 — `scan` slice)
 
 ## Seam 0 — Live-DB spike (D9) — already done before this batch
 
@@ -133,3 +133,57 @@ make test-go   # same result, run via the Makefile target directly
 ### Status
 
 13/13 Seam 1 tasks addressed (11 done outright by this batch; T-122 and the `make test-rls` portion of T-130 deferred to the orchestrator's live-DB pass, which this batch was explicitly instructed not to run). Ready for live-DB verification, then ready for Seam 2-8 `sdd-apply` batches (parallelizable, any order, all depend only on this seam).
+
+---
+
+## Seam 2 — `scan` slice: `GetScanRun` + `TriggerScan`
+
+> Branch: `feat/rls-scan` (based on `main`, which now includes Seam 1's merged foundation)
+
+### TDD Cycle Evidence
+
+| Task | RED | GREEN | REFACTOR |
+|------|-----|-------|----------|
+| T-131/T-132 (`scan.GetScanRun` + `scan.TriggerScan` wired to `platform.WithTenantTx`) | Wrote `api/internal/scan/rls_integration_test.go` using the `rlsdb` harness BEFORE wiring the service. Ran against a live NULLIF-migrated DB (`docker compose up -d postgres`) with `TEST_DATABASE_URL` set — confirmed RED: `owner_GetScanRun_still_succeeds` failed with `sql: no rows in result set` and `TriggerScan_...` failed with `ERROR: new row violates row-level security policy for table "scan_runs" (SQLSTATE 42501)`, because `GetScanRun`/`TriggerScan` ran over the raw pool with no `app.current_user_id` GUC set — RLS denied everything, including the owner's own rows. The cross-tenant-denial subtest passed even in RED (denial was already true by accident, for the wrong reason — no GUC at all, not a properly-scoped denial) | Wired `scan.Service.GetScanRun`'s `GetScanRunByID` call and `scan.Service.TriggerScan`'s `ListEnabledWatchedCompaniesByUser` + `InsertScanRun` calls through `platform.WithTenantTx`, keeping the `queue.Enqueue` loop outside the tx (after commit) and the app-layer `scanRun.UserID != userID` check in `GetScanRun` as defense-in-depth. Re-ran the same test — all 3 subtests PASS | n/a — straight wiring, mirrors the `cv.EnqueueIngest`/`GetIngestion` precedent exactly; no refactor needed |
+| T-133 (verify) | n/a | `cd api && go test ./internal/scan/... -count=1` against the live DB: 9/9 tests pass (8 pre-existing mock-based `handler_test.go` tests unmodified + 1 new `TestScanRLS_Integration` with 3 subtests). Re-ran 3x in isolation for stability — all green. Also ran `go build ./...`, `go vet ./...`, and `make test-go` (full unit suite, no `TEST_DATABASE_URL` — confirms clean skip path) — all green | n/a |
+
+### Files changed
+
+| File | Action | What was done |
+|------|--------|----------------|
+| `api/internal/scan/rls_integration_test.go` | Created | `TestScanRLS_Integration` using the `rlsdb` harness: seeds users A and B, seeds a `scan_runs` row for A via `AdminPool`, asserts B's `GetScanRun(A's runID)` is denied with `sql.ErrNoRows` (RLS denial, proven independent of the app-layer check since it is exercised purely at the DB layer through `app_user`), asserts A's own `GetScanRun` succeeds, asserts `TriggerScan` for A inserts a `scan_runs` row and enqueues at least one `scan-company` pgboss job. |
+| `api/internal/scan/service.go` | Modified | `GetScanRun` and `TriggerScan` now wrap their sqlc calls in `platform.WithTenantTx(ctx, s.pool, userID, fn)`. Removed the now-unused `s.queries()` helper, `pgx/v5/stdlib` import; added `platform` import. `TriggerScan`'s `queue.Enqueue` loop stays outside the tx, after commit, capturing `companies`/`scanRun` via closure variables. `GetScanRun`'s app-layer `scanRun.UserID != userID` check is preserved as defense-in-depth (PR #8), now running against an RLS-backed result. |
+
+### Deviations from design
+
+None — implementation matches `design.md` §2 (`scan` row in the per-domain method-by-method table) and §1.3 exactly: both methods replace direct `s.queries()` calls with `platform.WithTenantTx`, the enqueue loop stays outside the tx, and the app-layer ownership check in `GetScanRun` is kept, not removed.
+
+One addition beyond the literal task description: T-131's test also asserts `TriggerScan` enqueues at least one `pgboss.job` row (via `h.EnsurePgbossStandin` + a seeded enabled `watched_companies` row), not just that the `scan_runs` row is inserted — this exercises the full "outside the tx, after commit" enqueue path end-to-end rather than only the DB-write portion, closing a gap the task description's wording ("insert correctly") left implicit.
+
+### Issues found
+
+None. One pre-existing (not introduced by this seam) test-infra hazard noted for awareness: running `./internal/scan/...` together with `./internal/cv/...` (and other packages using the same `EnsurePgbossStandin`/`ensurePgbossStandin` `CREATE TABLE IF NOT EXISTS pgboss.job` DDL) under Go's default parallel-package test execution against the same live DB can intermittently race with `ERROR: tuple concurrently updated (SQLSTATE XX000)`. This is shared infrastructure from Seam 1 (the `rlsdb` harness and the `cv` test both have this DDL), not scan-specific, and is avoided by running packages sequentially (`-p 1`) or any single package alone — confirmed stable across 3 consecutive runs of `./internal/scan/...` alone. Not fixed in this batch (out of scope — `rlsdb` harness file belongs to Seam 1, already merged to `main`); flagging for the cross-seam verification pass (T-155) since it will exercise multiple domain packages together against one live DB.
+
+### Workload / PR boundary
+
+- Mode: chained PR slice (`stacked-to-main`)
+- Current work unit: PR-2 — `scan` slice (Seam 2 only, T-131..T-133)
+- Boundary: starts from `main` (post-Seam-1-merge) on branch `feat/rls-scan`; ends at a fully compiling, fully-passing state with `scan.GetScanRun`/`scan.TriggerScan` wired through `platform.WithTenantTx`, the new integration test passing against a live NULLIF-migrated DB, and zero changes to any other domain (`tracker`, `auth`, `jobs`, `evaluate`, `companies`, `cv` untouched, per scope)
+- Estimated review budget impact: ~70 hand-written lines per the Review Workload Forecast in `tasks.md` (service ~30, integration test ~40) — well under the 400-line budget, independent of every other seam
+
+### Status
+
+3/3 Seam 2 tasks complete (T-131, T-132, T-133). Cumulative: 14/16 tasks across Seams 1-2 complete (T-122 and T-130's `make test-rls` portion remain deferred to the orchestrator's live pgTAP run, as in the prior batch). Ready for verify, then ready for Seam 3-8 `sdd-apply` batches (parallelizable, any order, all depend only on Seam 1).
+
+### Remaining tasks (cumulative)
+
+- [ ] T-122 — full `make test-rls` pgTAP suite against a live DB (orchestrator). Not run in this batch (out of scope — T-131..T-133 only). Partial corroboration only: this batch's `docker compose up -d postgres` spin-up confirmed via direct `psql` inspection that the `tenant_scan_runs` policy on `scan_runs` already carries the NULLIF form (`user_id = (NULLIF(current_setting('app.current_user_id', true), ''))::uuid`), consistent with migration 003 having auto-applied — but the pgTAP assertions themselves were not executed
+- [ ] T-130's `make test-rls` portion — same as above, not run in this batch
+- [x] Seam 2 (`scan`) — T-131..T-133
+- [ ] Seam 3 (`tracker`) — T-134..T-136
+- [ ] Seam 4 (`auth`) — T-137..T-139
+- [ ] Seam 5 (`jobs`) — T-140..T-142
+- [ ] Seam 6 (`evaluate`) — T-143..T-145
+- [ ] Seam 7 (`companies`) — T-146..T-148
+- [ ] Seam 8 (`cv` remaining 5 methods) — T-149..T-152
+- [ ] Seam 9 (cross-seam final verification) — T-153..T-156
