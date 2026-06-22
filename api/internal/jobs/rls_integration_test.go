@@ -30,6 +30,14 @@ func TestJobsRLS_Integration(t *testing.T) {
 	userA := h.SeedUser(ctx, t, "jobs-itest-a@test.invalid", "jobs_itest_google_a")
 	userB := h.SeedUser(ctx, t, "jobs-itest-b@test.invalid", "jobs_itest_google_b")
 
+	// jobs has no unique constraint that lets re-runs collide-and-replace
+	// (unlike e.g. an upsert keyed on (user_id, url) alone reused verbatim);
+	// each run adds a new uuid-suffixed URL, so a stable seeded user's job
+	// list grows across repeated runs against a persistent DB. Clear any
+	// prior fixtures for these two test users before asserting List's count.
+	_, err := h.AdminPool.Exec(ctx, `DELETE FROM jobs WHERE user_id = ANY($1)`, []uuid.UUID{userA, userB})
+	require.NoError(t, err, "clear stale job fixtures")
+
 	svc := jobs.NewService(h.AppPool)
 
 	jobA, err := svc.AddManual(ctx, userA, "https://boards.greenhouse.io/acme/jobs/"+uuid.New().String())

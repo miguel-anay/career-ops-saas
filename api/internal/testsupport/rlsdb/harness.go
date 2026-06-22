@@ -79,12 +79,32 @@ func (h *Harness) SeedUser(ctx context.Context, t *testing.T, email, googleID st
 	return id
 }
 
+// pgbossStandinLockID is an arbitrary fixed key for a Postgres
+// transaction-scoped advisory lock. Multiple test packages call
+// EnsurePgbossStandin concurrently (Go runs packages in parallel by
+// default); CREATE SCHEMA/TABLE IF NOT EXISTS does not fully serialize
+// against concurrent DDL on the same object, so without this lock
+// concurrent callers can race with "tuple concurrently updated" errors.
+// pg_advisory_xact_lock (rather than the session-scoped variant) is used
+// because AdminPool is a connection pool — a session-scoped lock/unlock
+// pair could land on two different pooled connections and never actually
+// release. The xact-scoped lock is tied to one transaction on one
+// connection and is released automatically at commit.
+const pgbossStandinLockID = 0x70676220 // "pgb " in hex, arbitrary
+
 // EnsurePgbossStandin creates a minimal pgboss.job table matching the
 // columns queue.Enqueue inserts, and grants app_user INSERT/SELECT, so the
 // enqueue path runs against a bare migrated DB. The real schema is created
 // by the pg-boss runtime at worker boot; this is a test fixture only.
 func (h *Harness) EnsurePgbossStandin(ctx context.Context, t *testing.T) {
 	t.Helper()
+	tx, err := h.AdminPool.Begin(ctx)
+	require.NoError(t, err, "begin pgboss stand-in tx")
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
+
+	_, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, pgbossStandinLockID)
+	require.NoError(t, err, "acquire pgboss stand-in advisory lock")
+
 	const ddl = `
 		CREATE SCHEMA IF NOT EXISTS pgboss;
 		CREATE TABLE IF NOT EXISTS pgboss.job (
@@ -99,6 +119,8 @@ func (h *Harness) EnsurePgbossStandin(ctx context.Context, t *testing.T) {
 		);
 		GRANT USAGE ON SCHEMA pgboss TO app_user;
 		GRANT INSERT, SELECT ON pgboss.job TO app_user;`
-	_, err := h.AdminPool.Exec(ctx, ddl)
+	_, err = tx.Exec(ctx, ddl)
 	require.NoError(t, err, "create pgboss stand-in schema")
+
+	require.NoError(t, tx.Commit(ctx), "commit pgboss stand-in tx")
 }
