@@ -1,9 +1,9 @@
 # Apply Progress — `rls-tenancy-wiring`
 
-> Phase: apply · Status: Seam 1 (foundation) complete, Seam 2 (`scan`) complete, Seams 3-8 not started
-> Branch: `feat/rls-foundation` (Seam 1) → `feat/rls-scan` (Seam 2, based on `main` including Seam 1's foundation)
+> Phase: apply · Status: Seam 1 (foundation) complete, Seam 2 (`scan`) complete, Seam 3 (`tracker`) complete, Seams 4-8 not started
+> Branch: `feat/rls-foundation` (Seam 1) → `feat/rls-scan` (Seam 2, based on `main` including Seam 1's foundation) → `feat/rls-tracker` (Seam 3, based on `main` including Seam 1's foundation AND Seam 2's `scan` slice)
 > Mode: Strict TDD (test runner: `make test-all` / `cd api && go test ./... -count=1`; `make test-rls` for pgTAP)
-> Batch: 2 of N (Seam 2 — `scan` slice)
+> Batch: 3 of N (Seam 3 — `tracker` slice)
 
 ## Seam 0 — Live-DB spike (D9) — already done before this batch
 
@@ -175,12 +175,66 @@ None. One pre-existing (not introduced by this seam) test-infra hazard noted for
 
 3/3 Seam 2 tasks complete (T-131, T-132, T-133). Cumulative: 14/16 tasks across Seams 1-2 complete (T-122 and T-130's `make test-rls` portion remain deferred to the orchestrator's live pgTAP run, as in the prior batch). Ready for verify, then ready for Seam 3-8 `sdd-apply` batches (parallelizable, any order, all depend only on Seam 1).
 
-### Remaining tasks (cumulative)
+### Remaining tasks (cumulative, as of end of Seam 2)
 
 - [ ] T-122 — full `make test-rls` pgTAP suite against a live DB (orchestrator). Not run in this batch (out of scope — T-131..T-133 only). Partial corroboration only: this batch's `docker compose up -d postgres` spin-up confirmed via direct `psql` inspection that the `tenant_scan_runs` policy on `scan_runs` already carries the NULLIF form (`user_id = (NULLIF(current_setting('app.current_user_id', true), ''))::uuid`), consistent with migration 003 having auto-applied — but the pgTAP assertions themselves were not executed
 - [ ] T-130's `make test-rls` portion — same as above, not run in this batch
 - [x] Seam 2 (`scan`) — T-131..T-133
 - [ ] Seam 3 (`tracker`) — T-134..T-136
+- [ ] Seam 4 (`auth`) — T-137..T-139
+- [ ] Seam 5 (`jobs`) — T-140..T-142
+- [ ] Seam 6 (`evaluate`) — T-143..T-145
+- [ ] Seam 7 (`companies`) — T-146..T-148
+- [ ] Seam 8 (`cv` remaining 5 methods) — T-149..T-152
+- [ ] Seam 9 (cross-seam final verification) — T-153..T-156
+
+---
+
+## Seam 3 — `tracker` slice: `UpdateApplication` ordering fix + `ListApplications`
+
+> Branch: `feat/rls-tracker` (based on `main`, which now includes Seam 1's merged foundation AND Seam 2's merged `scan` slice)
+
+### TDD Cycle Evidence
+
+| Task | RED | GREEN | REFACTOR |
+|------|-----|-------|----------|
+| T-134/T-135 (`tracker.UpdateApplication` + `tracker.ListApplications` wired to `platform.WithTenantTx`, D8 post-UPDATE check dropped) | Wrote `api/internal/tracker/rls_integration_test.go` using the `rlsdb` harness BEFORE wiring the service. Seeded a `jobs` row (FK parent, `applications.job_id` is `NOT NULL UNIQUE`) + an `applications` row for user A via `AdminPool`. Ran against a live NULLIF-migrated DB (`docker compose up -d postgres`) with `TEST_DATABASE_URL` set — confirmed RED: the cross-tenant-denial subtest passed (by RLS-with-no-GUC accident, same pattern as Seam 2), but `owner_UpdateApplication_still_succeeds_...` failed with `not found` — because `UpdateApplication` ran over the raw pool (`s.queries()`) with no `app.current_user_id` GUC set, so RLS denied the owner's own UPDATE too, the UPDATE returned `sql.ErrNoRows`, and the service mapped that to `ErrNotFound` | Wired `tracker.Service.UpdateApplication`'s `UpdateApplicationStatus`/`UpdateApplicationNotes` calls (both in the SAME `platform.WithTenantTx` call when both fire — atomic per design.md §2) and `tracker.Service.ListApplications`'s `ListApplicationsByUser` call through `platform.WithTenantTx`. Deleted the now-unused `s.queries()` helper and its `pgx/v5/stdlib` import; added `platform` import. **Dropped** the post-UPDATE `if updated.UserID != userID` check per design.md D8 (tracker-specific guidance — explicitly differs from scan's keep-as-defense-in-depth pattern). Re-ran the same test — both subtests PASS | n/a — straight wiring, mirrors the `scan`/`cv` precedent; the only structural change is collapsing 3 separate UPDATE branches (status-only / notes-only / both) into one `WithTenantTx` closure with two conditional UPDATEs, which also fixed the pre-existing bug where the both-fields branch's first UPDATE's ownership check (`updated.UserID != userID`) ran on a partially-applied result before the second UPDATE — this whole hazard disappears once RLS is the only guard |
+| T-136 (verify) | n/a | `cd api && go test ./internal/tracker/... -count=1` against the live DB: 10/10 tests pass (9 pre-existing mock-based `handler_test.go` tests unmodified + 1 new `TestTrackerRLS_Integration` with 2 subtests). Re-ran 3x in isolation for stability — all green. Also confirmed the test skips cleanly without `TEST_DATABASE_URL` (`go test ./internal/tracker/... -count=1 -v` with no env var set → `SKIP: TestTrackerRLS_Integration`). Ran `go build ./...`, `go vet ./...`, and `make test-go` (full unit suite across all Go packages, including `scan`/`cv`/`platform`/`testsupport/rlsdb` from prior seams) — all green | n/a |
+
+### Files changed
+
+| File | Action | What was done |
+|------|--------|----------------|
+| `api/internal/tracker/rls_integration_test.go` | Created | `TestTrackerRLS_Integration` using the `rlsdb` harness: seeds users A and B, seeds a `jobs` row + an `applications` row for A via `AdminPool` (jobs.url carries a UUID suffix so the test is safely re-runnable against a DB that retains prior fixtures, avoiding a `jobs_user_id_url_key` collision), asserts B's `UpdateApplication(A's appID, ...)` returns `tracker.ErrNotFound` and A's row is verified unchanged (`status` still `'Evaluated'`) via `AdminPool` after B's attempt, asserts A's own `UpdateApplication` succeeds and is visible on a subsequent `AdminPool` read (`status` now `'Applied'`). |
+| `api/internal/tracker/service.go` | Modified | `ListApplications` and `UpdateApplication` now wrap their sqlc calls in `platform.WithTenantTx(ctx, s.pool, userID, fn)`. Removed the now-unused `s.queries()` helper and `pgx/v5/stdlib` import; added `platform` import. `UpdateApplication` collapsed its 3 separate update branches into one `WithTenantTx` closure containing up to 2 conditional UPDATEs (status, then notes) sharing one tx — atomic when both fire. The post-UPDATE `if updated.UserID != userID` check is **removed** (D8) — `sql.ErrNoRows` from the UPDATE itself (RLS `USING` excludes a non-owner's row from the target scan) is now mapped directly to `tracker.ErrNotFound` after `WithTenantTx` returns. |
+
+### Deviations from design
+
+None — implementation matches `design.md` §2 (`tracker` row in the per-domain method-by-method table) and D8 exactly: both UPDATEs share one tenant tx when both status and notes are provided, and the post-UPDATE ownership check is dropped (not kept as defense-in-depth, unlike scan's `GetScanRun` — design.md is explicit that tracker's D8 guidance differs from scan's pattern, and this was independently verified against design.md before assuming).
+
+One incidental improvement beyond the literal task description: the pre-existing both-fields code path had a structural bug (latent, not a regression introduced by this change, but only fully eliminated by this rewrite) — the first UPDATE's `updated.UserID != userID` check ran on `UpdateApplicationStatus`'s result and could short-circuit with `ErrNotFound` even after that first UPDATE had already mutated the row, leaving `notes` unset and `status` already changed for a hypothetical caller who passed someone else's `appID` purely as a sequencing artifact (impossible in this app since `appID` ownership was never separately validated before either UPDATE ran). Collapsing both UPDATEs into one `WithTenantTx` closure with RLS as the single gate removes this ambiguity entirely: either both UPDATEs commit (owner) or neither does (RLS denial → full rollback, since `WithTenantTx`'s `fn` returning a non-nil error rolls back the whole tx).
+
+### Issues found
+
+None new. Re-confirmed the same pre-existing (Seam-1-introduced, not tracker-specific) `EnsurePgbossStandin` DDL race noted in Seam 2's progress is irrelevant here — `tracker`'s integration test does not call `EnsurePgbossStandin` (no pgboss enqueue in this domain), so it is not exposed to that hazard at all.
+
+### Workload / PR boundary
+
+- Mode: chained PR slice (`stacked-to-main`)
+- Current work unit: PR-3 — `tracker` slice (Seam 3 only, T-134..T-136)
+- Boundary: starts from `main` (post-Seam-1-and-Seam-2-merge) on branch `feat/rls-tracker`; ends at a fully compiling, fully-passing state with `tracker.UpdateApplication`/`tracker.ListApplications` wired through `platform.WithTenantTx`, the D8 post-UPDATE check dropped, the new integration test passing against a live NULLIF-migrated DB, and zero changes to any other domain (`scan`, `auth`, `jobs`, `evaluate`, `companies`, `cv` untouched, per scope)
+- Estimated review budget impact: ~75 hand-written lines per the Review Workload Forecast in `tasks.md` (service ~25, integration test ~50) — well under the 400-line budget, independent of every other seam
+
+### Status
+
+3/3 Seam 3 tasks complete (T-134, T-135, T-136). Cumulative: 17/19 tasks across Seams 1-3 complete (T-122 and T-130's `make test-rls` portion remain deferred to the orchestrator's live pgTAP run, as in prior batches). Ready for verify, then ready for Seam 4-8 `sdd-apply` batches (parallelizable, any order, all depend only on Seam 1).
+
+### Remaining tasks (cumulative, as of end of Seam 3)
+
+- [ ] T-122 — full `make test-rls` pgTAP suite against a live DB (orchestrator). Still not run (deferred since Seam 1/2; out of scope for Seam 3 as well)
+- [ ] T-130's `make test-rls` portion — same as above, not run in this batch
+- [x] Seam 2 (`scan`) — T-131..T-133
+- [x] Seam 3 (`tracker`) — T-134..T-136
 - [ ] Seam 4 (`auth`) — T-137..T-139
 - [ ] Seam 5 (`jobs`) — T-140..T-142
 - [ ] Seam 6 (`evaluate`) — T-143..T-145
