@@ -10,8 +10,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/miguel-anay/career-ops-saas/api/internal/db"
+	"github.com/miguel-anay/career-ops-saas/api/internal/platform"
 )
 
 // ErrNotFound is returned when a company does not exist for this user.
@@ -25,11 +25,6 @@ type Service struct {
 // NewService creates a new companies Service.
 func NewService(pool *pgxpool.Pool) *Service {
 	return &Service{pool: pool}
-}
-
-func (s *Service) queries() *db.Queries {
-	sqlDB := stdlib.OpenDBFromPool(s.pool)
-	return db.New(sqlDB)
 }
 
 // DetectProvider infers the ATS provider from a careers URL hostname.
@@ -64,8 +59,12 @@ func DetectProvider(careersURL string) string {
 
 // List returns all watched companies for the given user.
 func (s *Service) List(ctx context.Context, userID uuid.UUID) ([]db.WatchedCompany, error) {
-	q := s.queries()
-	companies, err := q.ListWatchedCompaniesByUser(ctx, userID)
+	var companies []db.WatchedCompany
+	err := platform.WithTenantTx(ctx, s.pool, userID, func(q *db.Queries) error {
+		var err error
+		companies, err = q.ListWatchedCompaniesByUser(ctx, userID)
+		return err
+	})
 	if err != nil {
 		return nil, fmt.Errorf("list companies: %w", err)
 	}
@@ -83,20 +82,24 @@ func (s *Service) Add(ctx context.Context, userID uuid.UUID, name, careersURL, p
 		providerID = DetectProvider(careersURL)
 	}
 
-	q := s.queries()
-	company, err := q.InsertWatchedCompany(ctx, db.InsertWatchedCompanyParams{
-		UserID: userID,
-		Name:   name,
-		CareersUrl: sql.NullString{
-			String: careersURL,
-			Valid:  careersURL != "",
-		},
-		ProviderID: sql.NullString{
-			String: providerID,
-			Valid:  providerID != "" && providerID != "unknown",
-		},
-		AtsApiUrl: sql.NullString{},
-		Enabled:   true,
+	var company db.WatchedCompany
+	err := platform.WithTenantTx(ctx, s.pool, userID, func(q *db.Queries) error {
+		var err error
+		company, err = q.InsertWatchedCompany(ctx, db.InsertWatchedCompanyParams{
+			UserID: userID,
+			Name:   name,
+			CareersUrl: sql.NullString{
+				String: careersURL,
+				Valid:  careersURL != "",
+			},
+			ProviderID: sql.NullString{
+				String: providerID,
+				Valid:  providerID != "" && providerID != "unknown",
+			},
+			AtsApiUrl: sql.NullString{},
+			Enabled:   true,
+		})
+		return err
 	})
 	if err != nil {
 		return nil, fmt.Errorf("insert company: %w", err)
@@ -105,23 +108,33 @@ func (s *Service) Add(ctx context.Context, userID uuid.UUID, name, careersURL, p
 }
 
 // Remove deletes a watched company by ID.
-// RLS ensures only the owning user's companies are visible.
+// DeleteWatchedCompany has no `WHERE user_id` clause in the sqlc query
+// itself — RLS is the ONLY mechanism preventing cross-tenant deletion.
+// GetWatchedCompanyByID and DeleteWatchedCompany MUST run inside the SAME
+// tenant tx so the GUC-scoping invariant is consistent across both
+// statements (a non-owner's row is invisible to the SELECT under RLS
+// `USING`, so the lookup itself fails before DELETE is ever attempted).
 func (s *Service) Remove(ctx context.Context, userID uuid.UUID, companyID uuid.UUID) error {
-	q := s.queries()
-	// Verify ownership before deletion (RLS handles it but we return clean error).
-	company, err := q.GetWatchedCompanyByID(ctx, companyID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+	err := platform.WithTenantTx(ctx, s.pool, userID, func(q *db.Queries) error {
+		// Verify ownership before deletion (RLS handles it but we return clean error).
+		company, err := q.GetWatchedCompanyByID(ctx, companyID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("get company: %w", err)
+		}
+		if company.UserID != userID {
 			return ErrNotFound
 		}
-		return fmt.Errorf("get company: %w", err)
-	}
-	if company.UserID != userID {
-		return ErrNotFound
-	}
 
-	if err := q.DeleteWatchedCompany(ctx, companyID); err != nil {
-		return fmt.Errorf("delete company: %w", err)
+		if err := q.DeleteWatchedCompany(ctx, companyID); err != nil {
+			return fmt.Errorf("delete company: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 	return nil
 }

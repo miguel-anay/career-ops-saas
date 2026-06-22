@@ -153,9 +153,9 @@ Dependency edges: **Seam 0 → Seam 1** (the spike's empirical result confirms t
 
 | ID | Type | Description | File(s) |
 |----|------|--------------|---------|
-| T-146 | test | Write `companies/rls_integration_test.go`: seed `watched_companies` rows for A and B; assert B's `List` returns only B's companies, never A's; assert B's `Remove` against A's company ID deletes zero rows (since `DeleteWatchedCompany` has no `WHERE user_id` clause — RLS is the only guard) and A's row is verified still present via `AdminPool`; assert A's own `Add`/`List`/`Remove` still succeed — Req 2 scenario "companies.List/Add scoped correctly, no cross-tenant leakage", Req 3 scenario "companies.Remove cannot delete another tenant's row" | `api/internal/companies/rls_integration_test.go` (new) |
-| T-147 | impl | Wire `companies.Service.List`/`Add` through `platform.WithTenantTx`; wire `Remove`'s `GetWatchedCompanyByID` + `DeleteWatchedCompany` inside ONE tenant tx (both statements must share the same GUC-scoped tx since the DELETE has no app-layer WHERE) — makes T-146 green | `api/internal/companies/service.go` |
-| T-148 | verify | Run `cd api && go test ./internal/companies/... -count=1` — confirm existing provider-detection and handler tests pass unmodified | n/a (verification step) |
+| T-146 | test | [x] Write `companies/rls_integration_test.go`: seed `watched_companies` rows for A and B; assert B's `List` returns only B's companies, never A's; assert B's `Remove` against A's company ID deletes zero rows (since `DeleteWatchedCompany` has no `WHERE user_id` clause — RLS is the only guard) and A's row is verified still present via `AdminPool`; assert A's own `Add`/`List`/`Remove` still succeed — Req 2 scenario "companies.List/Add scoped correctly, no cross-tenant leakage", Req 3 scenario "companies.Remove cannot delete another tenant's row" | `api/internal/companies/rls_integration_test.go` (new) |
+| T-147 | impl | [x] Wire `companies.Service.List`/`Add` through `platform.WithTenantTx`; wire `Remove`'s `GetWatchedCompanyByID` + `DeleteWatchedCompany` inside ONE tenant tx (both statements must share the same GUC-scoped tx since the DELETE has no app-layer WHERE) — makes T-146 green | `api/internal/companies/service.go` |
+| T-148 | verify | [x] Run `cd api && go test ./internal/companies/... -count=1` — confirm existing provider-detection and handler tests pass unmodified | n/a (verification step) |
 
 **Sequencing within 7:** T-146 → T-147 → T-148, strictly sequential.
 
