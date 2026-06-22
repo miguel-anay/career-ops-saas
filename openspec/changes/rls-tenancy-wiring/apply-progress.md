@@ -1,9 +1,9 @@
 # Apply Progress — `rls-tenancy-wiring`
 
-> Phase: apply · Status: Seam 1 (foundation) complete, Seam 2 (`scan`) complete, Seam 3 (`tracker`) complete, Seam 4 (`auth`) complete, Seam 5 (`jobs`) complete, Seam 6 (`evaluate`) complete, Seam 7 (`companies`) complete, Seam 8 not started
-> Branch: `feat/rls-foundation` (Seam 1) → `feat/rls-scan` (Seam 2, based on `main` including Seam 1's foundation) → `feat/rls-tracker` (Seam 3, based on `main` including Seam 1's foundation AND Seam 2's `scan` slice) → `feat/rls-auth` (Seam 4, based on `main` including Seam 1+2+3) → `feat/rls-jobs` (Seam 5, based on `main` including Seam 1+2+3+4) → `feat/rls-evaluate` (Seam 6, based on `main` including Seam 1+2+3+4+5) → `feat/rls-companies` (Seam 7, based on `main` including Seam 1+2+3+4+5+6)
+> Phase: apply · Status: Seam 1 (foundation) complete, Seam 2 (`scan`) complete, Seam 3 (`tracker`) complete, Seam 4 (`auth`) complete, Seam 5 (`jobs`) complete, Seam 6 (`evaluate`) complete, Seam 7 (`companies`) complete, Seam 8 (`cv` remaining methods) complete — all domain seams done
+> Branch: `feat/rls-foundation` (Seam 1) → `feat/rls-scan` (Seam 2, based on `main` including Seam 1's foundation) → `feat/rls-tracker` (Seam 3, based on `main` including Seam 1's foundation AND Seam 2's `scan` slice) → `feat/rls-auth` (Seam 4, based on `main` including Seam 1+2+3) → `feat/rls-jobs` (Seam 5, based on `main` including Seam 1+2+3+4) → `feat/rls-evaluate` (Seam 6, based on `main` including Seam 1+2+3+4+5) → `feat/rls-companies` (Seam 7, based on `main` including Seam 1+2+3+4+5+6) → `feat/rls-cv` (Seam 8, based on `main` including Seam 1+2+3+4+5+6+7)
 > Mode: Strict TDD (test runner: `make test-all` / `cd api && go test ./... -count=1`; `make test-rls` for pgTAP)
-> Batch: 7 of N (Seam 7 — `companies` slice)
+> Batch: 8 of N (Seam 8 — `cv` remaining non-ingest methods; last domain seam)
 
 ## Seam 0 — Live-DB spike (D9) — already done before this batch
 
@@ -473,19 +473,96 @@ None new. Confirmed the same RED pattern as every prior seam (Seam 2/3/5/6): the
 
 RED confirmed before T-147: running the test first against the OLD `s.queries()`-over-raw-pool implementation produced a runtime RED against the live DB — the owner's own `List` subtest failed with a 0-vs-1 count mismatch and the owner's own `Add` subtest (inside the third subtest) failed with `ERROR: new row violates row-level security policy for table "watched_companies" (SQLSTATE 42501)`, proving the pre-wiring code does not engage RLS correctly (it denies everyone, including the owner, rather than scoping by tenant) — before the `WithTenantTx` wiring in T-147 made the test pass. `go build ./...` and `go vet ./...` were clean both before and after, since the RED was a runtime/live-DB failure, not a compile failure.
 
-### Status
+### Status (Seam 7)
 
-3/3 Seam 7 tasks complete (T-146, T-147, T-148). Cumulative: 29/31 tasks across Seams 1-7 complete (T-122 and T-130's `make test-rls` pgTAP portions remain deferred to the orchestrator's live pgTAP run, as in prior batches). Ready for verify, then ready for Seam 8 `sdd-apply` batch (depends only on Seam 1).
+3/3 Seam 7 tasks complete (T-146, T-147, T-148). Cumulative through Seam 7: 29/31 tasks across Seams 1-7 complete (T-122 and T-130's `make test-rls` pgTAP portions remained deferred to the orchestrator's live pgTAP run). Ready for verify, then ready for Seam 8 `sdd-apply` batch (depends only on Seam 1).
 
-### Remaining tasks (cumulative, as of end of Seam 7)
+---
 
-- [ ] T-122 — full `make test-rls` pgTAP suite against a live DB (orchestrator). Still not run (deferred since Seam 1/2; out of scope for Seam 3/4/5/6/7 as well)
-- [ ] T-130's `make test-rls` portion — same as above, not run in this batch
+## Seam 8 — `cv` slice (remaining non-ingest methods) — T-149..T-152, complete
+
+**Branch:** `feat/rls-cv`, based on `main` including Seam 1+2+3+4+5+6+7. **Scope:** the 5 `cv.Service` methods NOT covered by the earlier ingest-cv RLS wiring (`EnqueueIngest`/`GetIngestion` were already correctly wired via `platform.WithTenantTx` in Seam 1/T-127 and are untouched here): `ListCVs`, `CreateCV`, `SetMasterCV`, `EnqueuePDFGeneration`, `GetDownloadURL`. This is the **last domain seam** — Seams 1-8 are now all complete; only T-153..T-156 (cross-seam final verification) remain.
+
+### TDD Cycle Evidence
+
+| Task | RED | GREEN | REFACTOR |
+|------|-----|-------|----------|
+| T-149 (test) | Wrote `api/internal/cv/rls_integration_test.go` (`TestCVRLS_Integration`) using the `rlsdb` harness — seeds users A and B, clears stale `applications`/`jobs`/`cvs` fixtures via AdminPool (re-run safety, same pattern as Seam 7's `companies` fix), seeds a master `cvs` row for A plus a `jobs`→`applications` (with `pdf_path`) →`reports` chain for A. Ran against the OLD `s.queries()`-over-raw-pool implementation against the live NULLIF-migrated DB: 3 cross-tenant subtests passed (for the same "wrong reason" as every prior seam — no GUC at all, not correctly-scoped denial), but the owner-path subtest (`CreateCV`/`ListCVs`/`SetMasterCV`/`EnqueuePDFGeneration`) failed with `ERROR: new row violates row-level security policy for table "cvs" (SQLSTATE 42501)` on `CreateCV` — confirmed RED | — | — |
+| T-150 (impl) | — | Deleted `s.queries()` (the raw-pool helper via `stdlib.OpenDBFromPool`) and the now-unused `github.com/jackc/pgx/v5/stdlib` import. Wired `ListCVs`'s `ListCVsByUser` and `CreateCV`'s `InsertCV` each inside their own `platform.WithTenantTx` closure. Wired `SetMasterCV`'s `SetMasterCV` call inside `platform.WithTenantTx`. Wired `EnqueuePDFGeneration`'s 3 reads (`GetApplicationByJobID` + `GetReportByApplicationID` + `GetMasterCVByUser`) inside ONE `platform.WithTenantTx` closure, capturing `applicationID` out of the closure; `queue.Enqueue` for the `generate-pdf` job runs AFTER that tx commits, on the plain pool (mirrors `cv.EnqueueIngest`'s existing enqueue-after-commit shape and `scan.TriggerScan`'s precedent) | — |
+| T-151 (impl, highest-risk) | — | Wired `GetDownloadURL`'s `GetApplicationByJobID` read inside `platform.WithTenantTx`; `pdf_path` is captured into a local `pdfPath string` variable set inside the closure BEFORE the tx commits/exits; `r2.SignedDownloadURL(pdfPath, expiry)` is called strictly AFTER `platform.WithTenantTx(...)` returns — there is no pooled connection held during the R2 network round-trip. See "R2-outside-tx confirmation" below for the exact code | — |
+| T-152 (verify) | — | `cd api && go test ./internal/cv/... -count=1 -v` against the live docker-compose `postgres` (migrated through `003_rls_nullif.sql`): **23/23 test functions pass** — 22 pre-existing (incl. `TestCVIngest_RLS_Integration`, 5 subtests, unmodified) + new `TestCVRLS_Integration` (4 subtests: cross-tenant `ListCVs` isolation, cross-tenant `SetMasterCV` no-op-not-error with AdminPool-verified `is_master` unchanged, cross-tenant `GetDownloadURL` → `ErrNotFound`, owner `CreateCV`/`ListCVs`/`SetMasterCV`/`EnqueuePDFGeneration` all succeed). Re-ran 2x for stability — both green. `go build ./...` and `go vet ./...` clean. Full repo `go test ./... -count=1` — all 13 testable packages green | n/a |
+
+### R2-outside-tx confirmation (T-151, highest-severity item in this seam)
+
+Exact code in `api/internal/cv/service.go`'s `GetDownloadURL`:
+
+```go
+func (s *Service) GetDownloadURL(ctx context.Context, r2 *platform.R2Client, userID, jobID uuid.UUID) (string, time.Time, error) {
+	var pdfPath string
+	err := platform.WithTenantTx(ctx, s.pool, userID, func(q *db.Queries) error {
+		application, err := q.GetApplicationByJobID(ctx, jobID)
+		if err != nil {
+			return err
+		}
+		if !application.PdfPath.Valid || application.PdfPath.String == "" {
+			return ErrNoPDFPath
+		}
+		pdfPath = application.PdfPath.String
+		return nil
+	})
+	// The tenant tx has now committed/exited — no pooled connection is held
+	// past this point. Only after this do we call out to R2.
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", time.Time{}, ErrNotFound
+		}
+		if errors.Is(err, ErrNoPDFPath) {
+			return "", time.Time{}, ErrNoPDFPath
+		}
+		return "", time.Time{}, fmt.Errorf("get application: %w", err)
+	}
+
+	expiry := 24 * time.Hour
+	signedURL, err := r2.SignedDownloadURL(pdfPath, expiry)
+	...
+}
+```
+
+`r2.SignedDownloadURL(...)` is called textually and at runtime AFTER the `platform.WithTenantTx(...)` call has returned (its `err` has already been checked and the function has not returned early) — it is NOT inside the closure passed to `WithTenantTx`. `pdfPath` is a plain `string` captured by value from inside the closure, so no DB handle, transaction, or connection crosses the boundary into the R2 call. This matches design.md §2's `cv.GetDownloadURL` row and §7's risk table entry on R2-outside-tx verbatim.
+
+### Deviations from design
+
+None — implementation matches `design.md` §2's `cv` rows (`EnqueuePDFGeneration`, `GetDownloadURL`, `ListCVs`, `CreateCV`, `SetMasterCV`) exactly, including the explicit "Risk-driven split" instruction for `GetDownloadURL` (read inside the tx, commit/exit, THEN call R2 — §7 risk table, "cv.GetDownloadURL holds a pooled connection across R2 network I/O" mitigation).
+
+### Issues found
+
+Same RED shape as every prior seam: pre-wiring code denied the OWNER's own request (`CreateCV`) once tested against a live NULLIF-migrated DB — not a cross-tenant leak slipping through, because the raw pool never set `app.current_user_id`, so `INSERT INTO cvs` violated the `WITH CHECK` clause for everyone, owner included. No other deviations or surprises.
+
+### Workload / PR boundary
+
+- Mode: chained PR slice (`stacked-to-main`)
+- Current work unit: PR-8 — `cv` remaining-methods slice (Seam 8 only, T-149..T-152) — the last domain seam
+- Boundary: starts from `main` (post-Seam-1..7 merge) on branch `feat/rls-cv`; ends at a fully compiling, fully-passing state with `ListCVs`/`CreateCV`/`SetMasterCV`/`EnqueuePDFGeneration` wired through `platform.WithTenantTx` and `GetDownloadURL`'s R2 call strictly outside the tx, the new integration test passing against a live NULLIF-migrated DB, and zero changes to `EnqueueIngest`/`GetIngestion` or any other domain (`auth`, `scan`, `tracker`, `jobs`, `evaluate`, `companies` untouched, per scope)
+- Estimated review budget impact: ~95 hand-written lines (service ~45, integration test ~150 incl. fixtures/comments, but net new logic lines are small) — well under the 400-line budget, independent of every other seam
+- Not committed or pushed, per instruction — working tree left as-is
+
+### Test results (Seam 8)
+
+`cd api && go test ./internal/cv/... -count=1 -v` (with `TEST_DATABASE_URL` set against the live docker-compose `postgres` service, already migrated through `003_rls_nullif.sql`): **23/23 test functions pass** — all pre-existing tests (`TestEnqueueCV_*`, `TestGetCV_*`, `TestListCVs_*`, `TestCreateCV_*`, `TestIngest_*`, `TestGetIngestion_*`, `TestCVIngest_RLS_Integration` with its 5 subtests) unmodified and green, plus the new `TestCVRLS_Integration` (4 subtests) green. Re-ran 2x for stability — consistently green. Without `TEST_DATABASE_URL`, both integration tests skip cleanly. Full repo `go test ./... -count=1` — all 13 testable packages green (`auth`, `companies`, `cv`, `evaluate`, `jobs`, `middleware`, `platform`, `scan`, `testsupport/rlsdb`, `tracker`, `ws`).
+
+### Status (Seam 8)
+
+4/4 Seam 8 tasks complete (T-149, T-150, T-151, T-152). **All 8 domain seams are now complete.** Cumulative: 33/35 tasks across Seams 1-8 complete (T-122 and T-130's `make test-rls` pgTAP portions remain deferred to the orchestrator's live pgTAP run, as in every prior batch). Ready for verify, then ready for the cross-seam final verification batch (T-153..T-156 — `make test-all`, `make test-rls`, the full per-domain `TEST_DATABASE_URL` run across all 7 domains together, and the grep-audit for any remaining raw-pool tenant-table call site).
+
+### Remaining tasks (cumulative, as of end of Seam 8)
+
+- [ ] T-122 — full `make test-rls` pgTAP suite against a live DB (orchestrator). Still not run (deferred since Seam 1/2; out of scope for every service seam)
+- [ ] T-130's `make test-rls` portion — same as above, not run in any seam batch
 - [x] Seam 2 (`scan`) — T-131..T-133
 - [x] Seam 3 (`tracker`) — T-134..T-136
 - [x] Seam 4 (`auth`) — T-137..T-139
 - [x] Seam 5 (`jobs`) — T-140..T-142
 - [x] Seam 6 (`evaluate`) — T-143..T-145
 - [x] Seam 7 (`companies`) — T-146..T-148
-- [ ] Seam 8 (`cv` remaining 5 methods) — T-149..T-152
+- [x] Seam 8 (`cv` remaining 5 methods) — T-149..T-152
 - [ ] Seam 9 (cross-seam final verification) — T-153..T-156
