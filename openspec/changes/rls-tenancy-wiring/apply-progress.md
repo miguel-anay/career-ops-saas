@@ -1,9 +1,9 @@
 # Apply Progress — `rls-tenancy-wiring`
 
-> Phase: apply · Status: Seam 1 (foundation) complete, Seam 2 (`scan`) complete, Seam 3 (`tracker`) complete, Seam 4 (`auth`) complete, Seam 5 (`jobs`) complete, Seams 6-8 not started
-> Branch: `feat/rls-foundation` (Seam 1) → `feat/rls-scan` (Seam 2, based on `main` including Seam 1's foundation) → `feat/rls-tracker` (Seam 3, based on `main` including Seam 1's foundation AND Seam 2's `scan` slice) → `feat/rls-auth` (Seam 4, based on `main` including Seam 1+2+3) → `feat/rls-jobs` (Seam 5, based on `main` including Seam 1+2+3+4)
+> Phase: apply · Status: Seam 1 (foundation) complete, Seam 2 (`scan`) complete, Seam 3 (`tracker`) complete, Seam 4 (`auth`) complete, Seam 5 (`jobs`) complete, Seam 6 (`evaluate`) complete, Seams 7-8 not started
+> Branch: `feat/rls-foundation` (Seam 1) → `feat/rls-scan` (Seam 2, based on `main` including Seam 1's foundation) → `feat/rls-tracker` (Seam 3, based on `main` including Seam 1's foundation AND Seam 2's `scan` slice) → `feat/rls-auth` (Seam 4, based on `main` including Seam 1+2+3) → `feat/rls-jobs` (Seam 5, based on `main` including Seam 1+2+3+4) → `feat/rls-evaluate` (Seam 6, based on `main` including Seam 1+2+3+4+5)
 > Mode: Strict TDD (test runner: `make test-all` / `cd api && go test ./... -count=1`; `make test-rls` for pgTAP)
-> Batch: 5 of N (Seam 5 — `jobs` slice)
+> Batch: 6 of N (Seam 6 — `evaluate` slice)
 
 ## Seam 0 — Live-DB spike (D9) — already done before this batch
 
@@ -339,6 +339,66 @@ RED confirmed before T-141: running the test first against the OLD `s.repo()`-ov
 - [x] Seam 4 (`auth`) — T-137..T-139
 - [x] Seam 5 (`jobs`) — T-140..T-142
 - [ ] Seam 6 (`evaluate`) — T-143..T-145
+- [ ] Seam 7 (`companies`) — T-146..T-148
+- [ ] Seam 8 (`cv` remaining 5 methods) — T-149..T-152
+- [ ] Seam 9 (cross-seam final verification) — T-153..T-156
+
+---
+
+## Seam 6 — `evaluate` slice: `GetReport` 3-step chain + `EnqueueEvaluation` (T-143..T-145, complete, this batch, branch `feat/rls-evaluate` based on `main` post-Seam-1/2/3/4/5)
+
+### TDD Cycle Evidence
+
+| Task | RED | GREEN | REFACTOR |
+|------|-----|-------|----------|
+| T-143/T-144 (`evaluate.Service.GetReport`'s 3-step chain + `EnqueueEvaluation`'s job-lookup+usage-read wired to `platform.WithTenantTx`) | Wrote `api/internal/evaluate/rls_integration_test.go` using the `rlsdb` harness BEFORE wiring the service. Seeded a `jobs`→`applications`→`reports` chain owned by A directly via `AdminPool` raw SQL inserts (no existing Service constructor inserts a full report chain, so ground-truth seeding mirrors the precedent of seeding fixtures independent of the Service under test). Ran against a live NULLIF-migrated DB (`docker compose up -d postgres`) with `TEST_DATABASE_URL` set — confirmed RED: the cross-tenant-denial subtest passed (by RLS-with-no-GUC accident, same pattern as every prior seam), but `owner_GetReport_still_succeeds` and `owner_EnqueueEvaluation_still_succeeds_...` both failed with `not found`, because `GetReport` and `EnqueueEvaluation` ran over `s.queries()` (raw pool, no `app.current_user_id` GUC set), so RLS denied the owner's own reads too | Removed `s.queries()` (raw-pool helper, `stdlib.OpenDBFromPool`); deleted its now-unused `pgx/v5/stdlib` import; added `platform` import. Wired `GetReport`'s 3-step chain (`GetJobByID` → `GetApplicationByJobID` → `GetReportByApplicationID`) inside ONE `platform.WithTenantTx(ctx, s.pool, userID, fn)` closure, mapping any not-found across all three reads to `evaluate.ErrNotFound` after the tx returns. Wired `EnqueueEvaluation`'s `GetJobByID` + `GetUsageByUserMonth` inside one tenant tx closure (returning sentinel errors `ErrNotFound`/`ErrUsageLimitExceeded` from inside the closure, re-mapped after `WithTenantTx` returns), with `queue.Enqueue` called strictly AFTER that tx commits (mirrors `cv.EnqueueIngest`'s documented pattern — pgboss.job has no RLS policy and must stay on the raw pool). Re-ran the same test — all 3 subtests PASS | n/a — straight wiring, mirrors the `cv.EnqueueIngest`/`jobs`/`scan` precedent exactly: build the closure, capture results via outer variables, re-map sentinel errors after the tx returns, enqueue only after commit |
+| T-145 (verify) | n/a | `cd api && go test ./internal/evaluate/... -count=1` against the live DB: 10/10 test functions pass (9 pre-existing mock-based `handler_test.go` tests — `TestEvaluate_HappyPath`, `TestEvaluate_MissingAuth`, `TestEvaluate_InvalidID`, `TestEvaluate_NotFound`, `TestEvaluate_UsageLimitExceeded`, `TestEvaluate_ServiceError`, `TestGetReport_HappyPath`, `TestGetReport_MissingAuth`, `TestGetReport_NotFound` — all unmodified, plus the new `TestEvaluateRLS_Integration` with 3 subtests). Confirmed clean skip without `TEST_DATABASE_URL` (`SKIP: TestEvaluateRLS_Integration`). Ran `go build ./...`, `go vet ./...` (both clean), and the full repo `go test ./... -count=1` (no `TEST_DATABASE_URL`) — all 13 testable packages green | n/a |
+
+### Files changed
+
+| File | Action | What was done |
+|------|--------|----------------|
+| `api/internal/evaluate/rls_integration_test.go` | Created | `TestEvaluateRLS_Integration` using the `rlsdb` harness: seeds users A and B, seeds a `jobs`→`applications`→`reports` chain for A via `AdminPool` raw SQL (jobs.url carries a UUID suffix to avoid `jobs_user_id_url_key` collisions on re-run; `applications.status` uses the enum literal `'Evaluated'`, not lowercase), asserts B's `GetReport(jobID)` returns `evaluate.ErrNotFound` (RLS denial across all three reads), asserts A's own `GetReport` succeeds and returns the correct `ApplicationID`, asserts A's own `EnqueueEvaluation` (job lookup + usage read inside the tenant tx, then enqueue after commit) still succeeds and returns a non-empty queue ID. Calls `h.EnsurePgbossStandin(ctx, t)` since `EnqueueEvaluation` enqueues a pgboss job. |
+| `api/internal/evaluate/service.go` | Modified | Deleted `s.queries()` (built a raw-pool `*db.Queries` via `stdlib.OpenDBFromPool` — no GUC scoping); dropped the now-unused `pgx/v5/stdlib` import; added `platform` import. `GetReport`'s 3-step chain (`GetJobByID` → `GetApplicationByJobID` → `GetReportByApplicationID`) now runs inside ONE `platform.WithTenantTx(ctx, s.pool, userID, fn)` closure instead of three separate raw-pool calls — any not-found inside the chain maps to `evaluate.ErrNotFound` after the tx returns. `EnqueueEvaluation`'s `GetJobByID` + `GetUsageByUserMonth` now run inside one tenant tx closure (sentinel errors `ErrNotFound`/`ErrUsageLimitExceeded` returned from inside the closure, re-checked via `errors.Is` after `WithTenantTx` returns); `queue.Enqueue` stays outside the tx, called only after a successful commit — unchanged call site, just moved after the tx instead of interleaved with the raw-pool reads. |
+
+### Deviations from design
+
+None — implementation matches `design.md`'s cv.EnqueueIngest precedent (queue.Enqueue called strictly after the tenant tx commits, never inside the closure) and the task's explicit instruction to wire all 3 of `GetReport`'s reads inside ONE `WithTenantTx` call (not three separate tx calls) and `EnqueueEvaluation`'s 2 reads inside ONE tenant tx as well.
+
+One necessary deviation in test seeding: since no existing Service method inserts a full `jobs`→`applications`→`reports` chain (the `evaluate` Service only reads these tables, it never writes `applications`/`reports` — those are written by the worker/other domains in production), the test seeds all three rows directly via raw SQL through `AdminPool`, rather than composing them from Service calls across domains. This matches the spirit of the cross-cutting verification method in spec.md (`AdminPool`/ground-truth pool for fixture seeding, `AppPool`-backed Service for the behavior under test) even though it required raw INSERT statements instead of calling `jobs.Service.AddManual` + a tracker/worker equivalent for `applications`/`reports` (no such service entrypoint exists for `applications`/`reports` inserts in the API layer at all — those are worker-only writes).
+
+### Issues found
+
+None. Confirmed the same RED pattern as every prior seam (Seam 2/3/5): the owner's own `GetReport`/`EnqueueEvaluation` calls were denied by RLS over the unscoped raw pool before wiring, not a cross-tenant leak slipping through — the cross-tenant assertion would have passed even in RED, for the "wrong" reason (no GUC at all, not a correctly-scoped denial). Same caveat already logged in every prior seam's progress notes.
+
+One schema gotcha discovered while writing the seed SQL: `applications.status` is the `app_status_t` enum with `'Evaluated'` (capital E, not lowercase `'evaluated'`) as its only "already scored" value — using the lowercase literal fails with an enum-mismatch error at INSERT time. Caught and fixed before the RED run (no wasted RED cycle on this; verified against `db/schema.sql`'s `CREATE TYPE app_status_t AS ENUM (...)` before writing the insert).
+
+### Workload / PR boundary
+
+- Mode: chained PR slice (`stacked-to-main`)
+- Current work unit: PR-6 — `evaluate` slice (Seam 6 only, T-143..T-145)
+- Boundary: starts from `main` (post-Seam-1/2/3/4/5 merge) on branch `feat/rls-evaluate`; ends at a fully compiling, fully-passing state with `evaluate.GetReport`'s 3-step chain and `evaluate.EnqueueEvaluation`'s job-lookup+usage-read wired through `platform.WithTenantTx`, `queue.Enqueue` confirmed to run strictly after commit, the new integration test passing against a live NULLIF-migrated DB, and zero changes to any other domain (`auth`, `scan`, `tracker`, `jobs`, `companies`, `cv` untouched, per scope)
+- Estimated review budget impact: ~95 hand-written lines per the Review Workload Forecast in `tasks.md` (service ~45, integration test ~80) — well under the 400-line budget, independent of every other seam
+
+### Test results
+
+`cd api && go test ./internal/evaluate/... -count=1 -v` (with `TEST_DATABASE_URL` set against the live docker-compose `postgres` service, migrated through `003_rls_nullif.sql`): **10/10 test functions pass** — 9 pre-existing mock-based `handler_test.go` tests unmodified and green, plus the new `TestEvaluateRLS_Integration` (3 subtests: non-owner `GetReport` denial across the chain, owner `GetReport` success, owner `EnqueueEvaluation` success) green. Without `TEST_DATABASE_URL` set, the integration test skips cleanly (`SKIP: TestEvaluateRLS_Integration`) and the rest of the suite (full repo `go test ./... -count=1`) stays green across all 13 testable packages (`auth`, `companies`, `cv`, `evaluate`, `jobs`, `middleware`, `platform`, `scan`, `testsupport/rlsdb`, `tracker`, `ws`).
+
+RED confirmed before T-144: running the test first against the OLD `s.queries()`-over-raw-pool implementation produced a runtime RED against the live DB — both `owner_GetReport_still_succeeds` and `owner_EnqueueEvaluation_still_succeeds_...` failed with `not found`, proving the pre-wiring code does not engage RLS correctly (it denies everyone, including the owner, rather than scoping by tenant) — before the `WithTenantTx` wiring in T-144 made the test pass. `go build ./...` and `go vet ./...` were clean both before and after, since the RED was a runtime/live-DB failure, not a compile failure.
+
+### Status
+
+3/3 Seam 6 tasks complete (T-143, T-144, T-145). Cumulative: 26/28 tasks across Seams 1-6 complete (T-122 and T-130's `make test-rls` pgTAP portions remain deferred to the orchestrator's live pgTAP run, as in prior batches). Ready for verify, then ready for Seam 7-8 `sdd-apply` batches (parallelizable, any order, all depend only on Seam 1).
+
+### Remaining tasks (cumulative, as of end of Seam 6)
+
+- [ ] T-122 — full `make test-rls` pgTAP suite against a live DB (orchestrator). Still not run (deferred since Seam 1/2; out of scope for Seam 3/4/5/6 as well)
+- [ ] T-130's `make test-rls` portion — same as above, not run in this batch
+- [x] Seam 2 (`scan`) — T-131..T-133
+- [x] Seam 3 (`tracker`) — T-134..T-136
+- [x] Seam 4 (`auth`) — T-137..T-139
+- [x] Seam 5 (`jobs`) — T-140..T-142
+- [x] Seam 6 (`evaluate`) — T-143..T-145
 - [ ] Seam 7 (`companies`) — T-146..T-148
 - [ ] Seam 8 (`cv` remaining 5 methods) — T-149..T-152
 - [ ] Seam 9 (cross-seam final verification) — T-153..T-156

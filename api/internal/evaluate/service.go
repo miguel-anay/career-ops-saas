@@ -10,8 +10,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/miguel-anay/career-ops-saas/api/internal/db"
+	"github.com/miguel-anay/career-ops-saas/api/internal/platform"
 	"github.com/miguel-anay/career-ops-saas/api/internal/queue"
 )
 
@@ -33,11 +33,6 @@ func NewService(pool *pgxpool.Pool) *Service {
 	return &Service{pool: pool}
 }
 
-func (s *Service) queries() *db.Queries {
-	sqlDB := stdlib.OpenDBFromPool(s.pool)
-	return db.New(sqlDB)
-}
-
 // evaluateJobPayload is the pg-boss job payload for "evaluate-job".
 type evaluateJobPayload struct {
 	UserID uuid.UUID `json:"user_id"`
@@ -46,37 +41,54 @@ type evaluateJobPayload struct {
 
 // EnqueueEvaluation checks usage limits and enqueues an "evaluate-job" pg-boss job.
 // Returns the queue job ID string.
+//
+// The job lookup and usage read both run inside ONE tenant-scoped
+// transaction (platform.WithTenantTx) so app.current_user_id is set for RLS
+// across both reads. The pg-boss enqueue happens AFTER that transaction
+// commits, using the plain pool (pgboss.job has no RLS policy) — mirrors
+// cv.EnqueueIngest.
 func (s *Service) EnqueueEvaluation(ctx context.Context, userID, jobID uuid.UUID) (string, error) {
-	q := s.queries()
+	month := time.Now().UTC().Format("2006-01")
 
-	// 1. Check job exists and belongs to user (RLS guarantees tenant isolation).
-	job, err := q.GetJobByID(ctx, jobID)
+	err := platform.WithTenantTx(ctx, s.pool, userID, func(q *db.Queries) error {
+		// 1. Check job exists and belongs to user (RLS guarantees tenant isolation).
+		job, err := q.GetJobByID(ctx, jobID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("get job: %w", err)
+		}
+		if job.UserID != userID {
+			return ErrNotFound
+		}
+
+		// 2. Check usage limit for free plan.
+		usage, err := q.GetUsageByUserMonth(ctx, db.GetUsageByUserMonthParams{
+			UserID: userID,
+			Month:  month,
+		})
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("get usage: %w", err)
+		}
+		// If no usage row exists yet, EvaluationsCount is 0.
+		if !errors.Is(err, sql.ErrNoRows) && usage.EvaluationsCount >= freePlanEvalLimit {
+			// TODO: skip limit check for pro/unlimited plans (requires user plan lookup).
+			return ErrUsageLimitExceeded
+		}
+		return nil
+	})
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, ErrNotFound) {
 			return "", ErrNotFound
 		}
-		return "", fmt.Errorf("get job: %w", err)
-	}
-	if job.UserID != userID {
-		return "", ErrNotFound
-	}
-
-	// 2. Check usage limit for free plan.
-	month := time.Now().UTC().Format("2006-01")
-	usage, err := q.GetUsageByUserMonth(ctx, db.GetUsageByUserMonthParams{
-		UserID: userID,
-		Month:  month,
-	})
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return "", fmt.Errorf("get usage: %w", err)
-	}
-	// If no usage row exists yet, EvaluationsCount is 0.
-	if !errors.Is(err, sql.ErrNoRows) && usage.EvaluationsCount >= freePlanEvalLimit {
-		// TODO: skip limit check for pro/unlimited plans (requires user plan lookup).
-		return "", ErrUsageLimitExceeded
+		if errors.Is(err, ErrUsageLimitExceeded) {
+			return "", ErrUsageLimitExceeded
+		}
+		return "", err
 	}
 
-	// 3. Enqueue evaluate-job.
+	// 3. Enqueue evaluate-job (outside the tenant tx — pgboss.job has no RLS policy).
 	queueID := uuid.New()
 	payload, err := json.Marshal(evaluateJobPayload{
 		UserID: userID,
@@ -97,38 +109,51 @@ func (s *Service) EnqueueEvaluation(ctx context.Context, userID, jobID uuid.UUID
 }
 
 // GetReport returns the report for the user's job.
+//
+// The 3-step chain (GetJobByID -> GetApplicationByJobID ->
+// GetReportByApplicationID) runs inside ONE tenant-scoped transaction
+// (platform.WithTenantTx) so app.current_user_id is set for RLS
+// consistently across all three reads, instead of three separate tx calls.
 func (s *Service) GetReport(ctx context.Context, userID, jobID uuid.UUID) (*db.Report, error) {
-	q := s.queries()
+	var report db.Report
+	err := platform.WithTenantTx(ctx, s.pool, userID, func(q *db.Queries) error {
+		// Verify job ownership.
+		job, err := q.GetJobByID(ctx, jobID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("get job: %w", err)
+		}
+		if job.UserID != userID {
+			return ErrNotFound
+		}
 
-	// Verify job ownership.
-	job, err := q.GetJobByID(ctx, jobID)
+		// Get application linked to this job.
+		application, err := q.GetApplicationByJobID(ctx, jobID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("get application: %w", err)
+		}
+
+		// Get report linked to this application.
+		r, err := q.GetReportByApplicationID(ctx, application.ID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("get report: %w", err)
+		}
+		report = r
+		return nil
+	})
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, ErrNotFound) {
 			return nil, ErrNotFound
 		}
-		return nil, fmt.Errorf("get job: %w", err)
+		return nil, err
 	}
-	if job.UserID != userID {
-		return nil, ErrNotFound
-	}
-
-	// Get application linked to this job.
-	application, err := q.GetApplicationByJobID(ctx, jobID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
-		}
-		return nil, fmt.Errorf("get application: %w", err)
-	}
-
-	// Get report linked to this application.
-	report, err := q.GetReportByApplicationID(ctx, application.ID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
-		}
-		return nil, fmt.Errorf("get report: %w", err)
-	}
-
 	return &report, nil
 }
