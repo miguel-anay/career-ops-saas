@@ -2,6 +2,8 @@ package auth
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -9,7 +11,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/miguel-anay/career-ops-saas/api/internal/config"
 	"github.com/miguel-anay/career-ops-saas/api/internal/db"
+	"github.com/miguel-anay/career-ops-saas/api/internal/platform"
 )
+
+// ErrNotFound is returned when a user does not exist for the requesting
+// tenant's RLS-scoped view (cross-tenant lookups surface this rather than
+// the other tenant's row).
+var ErrNotFound = errors.New("not found")
 
 // UpsertUser calls the SECURITY DEFINER auth_upsert_user function to create or
 // update the user record. This bypasses RLS because the tenant user_id is not
@@ -68,36 +76,34 @@ func IssueTokenPair(user *db.User, cfg *config.Config) (accessToken, refreshToke
 	return accessToken, refreshToken, nil
 }
 
-// GetUserByID fetches a user by UUID from the pool without tenant scoping.
-// Used internally (e.g. refresh token flow) where the user_id is trusted from the JWT.
-func GetUserByID(ctx context.Context, pool *pgxpool.Pool, userID uuid.UUID) (*db.User, error) {
-	const query = `SELECT id, email, google_id, plan, cv_markdown, profile_json, created_at FROM users WHERE id = $1 LIMIT 1`
-
-	row := pool.QueryRow(ctx, query, userID)
-
+// GetUserByID fetches a user by UUID, scoped to callerUserID via a tenant tx
+// (platform.WithTenantTx sets app.current_user_id = callerUserID for the
+// duration of the query, so RLS enforces the lookup). This is the
+// refresh-token read path: even though userID is trusted from a verified
+// JWT, the query itself is no longer unscoped over the raw pool — a
+// cross-tenant lookup (callerUserID != userID) is denied at the DB layer
+// (RLS USING excludes the row, sql.ErrNoRows -> ErrNotFound) rather than
+// relying on an app-layer check after an unscoped SELECT.
+//
+// auth.UpsertUser/auth_upsert_user are NOT touched by this — they remain
+// SECURITY DEFINER and run before any tenant context exists (OAuth
+// signup/login).
+func GetUserByID(ctx context.Context, pool *pgxpool.Pool, callerUserID, userID uuid.UUID) (*db.User, error) {
 	var u db.User
-	var cvMarkdown *string
-	var profileJSON []byte
 
-	err := row.Scan(
-		&u.ID,
-		&u.Email,
-		&u.GoogleID,
-		&u.Plan,
-		&cvMarkdown,
-		&profileJSON,
-		&u.CreatedAt,
-	)
+	err := platform.WithTenantTx(ctx, pool, callerUserID, func(q *db.Queries) error {
+		row, qErr := q.GetUserByID(ctx, userID)
+		if qErr != nil {
+			return qErr
+		}
+		u = row
+		return nil
+	})
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
 		return nil, fmt.Errorf("get user by id: %w", err)
-	}
-
-	if cvMarkdown != nil {
-		u.CvMarkdown.String = *cvMarkdown
-		u.CvMarkdown.Valid = true
-	}
-	if len(profileJSON) > 0 {
-		u.ProfileJson = profileJSON
 	}
 
 	return &u, nil
