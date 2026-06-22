@@ -80,7 +80,6 @@ func main() {
 	// 7. Mount /api routes with auth + tenant middleware.
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.Authenticator(cfg.JWTSecret))
-		r.Use(middleware.TenantIsolation(pool))
 
 		r.Get("/api/health", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
