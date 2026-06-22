@@ -8,8 +8,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/miguel-anay/career-ops-saas/api/internal/db"
+	"github.com/miguel-anay/career-ops-saas/api/internal/platform"
 	"github.com/miguel-anay/career-ops-saas/api/internal/queue"
 )
 
@@ -23,11 +23,6 @@ func NewService(pool *pgxpool.Pool) *Service {
 	return &Service{pool: pool}
 }
 
-func (s *Service) queries() *db.Queries {
-	sqlDB := stdlib.OpenDBFromPool(s.pool)
-	return db.New(sqlDB)
-}
-
 // scanCompanyPayload is the pg-boss job payload for "scan-company".
 type scanCompanyPayload struct {
 	UserID    uuid.UUID `json:"user_id"`
@@ -37,19 +32,33 @@ type scanCompanyPayload struct {
 
 // TriggerScan creates a scan_run row and enqueues one "scan-company" job per
 // enabled watched company. Returns the scan_run ID.
+//
+// The watched-companies read and the scan_run insert run inside a single
+// platform.WithTenantTx so both are RLS-scoped to userID. The queue.Enqueue
+// loop stays OUTSIDE the tx (after commit) — pgboss.* has no RLS policy and
+// must stay on the raw pool.
 func (s *Service) TriggerScan(ctx context.Context, userID uuid.UUID) (uuid.UUID, error) {
-	q := s.queries()
+	var companies []db.WatchedCompany
+	var scanRun db.ScanRun
 
-	// 1. List enabled watched companies for user.
-	companies, err := q.ListEnabledWatchedCompaniesByUser(ctx, userID)
-	if err != nil {
-		return uuid.Nil, fmt.Errorf("list enabled companies: %w", err)
-	}
+	err := platform.WithTenantTx(ctx, s.pool, userID, func(q *db.Queries) error {
+		// 1. List enabled watched companies for user.
+		var err error
+		companies, err = q.ListEnabledWatchedCompaniesByUser(ctx, userID)
+		if err != nil {
+			return fmt.Errorf("list enabled companies: %w", err)
+		}
 
-	// 2. Insert scan_run row (status defaults to 'running').
-	scanRun, err := q.InsertScanRun(ctx, userID)
+		// 2. Insert scan_run row (status defaults to 'running').
+		scanRun, err = q.InsertScanRun(ctx, userID)
+		if err != nil {
+			return fmt.Errorf("insert scan_run: %w", err)
+		}
+
+		return nil
+	})
 	if err != nil {
-		return uuid.Nil, fmt.Errorf("insert scan_run: %w", err)
+		return uuid.Nil, err
 	}
 
 	// 3. Enqueue one "scan-company" job per company.
@@ -76,16 +85,26 @@ func (s *Service) TriggerScan(ctx context.Context, userID uuid.UUID) (uuid.UUID,
 }
 
 // GetScanRun returns the scan_run record by ID, scoped to the requesting user.
-// A scan_run owned by another tenant is reported as not found (sql.ErrNoRows)
-// so its existence is never revealed cross-tenant. This app-layer ownership
-// check is defense-in-depth; the DB-level RLS gate is wired separately in the
-// rls-tenancy-wiring change.
+// The lookup runs inside a platform.WithTenantTx scoped to userID, so a
+// scan_run owned by another tenant is invisible at the DB layer (RLS USING
+// denial) and GetScanRunByID itself returns sql.ErrNoRows — independent of
+// the app-layer scanRun.UserID != userID check below, which is kept as
+// defense-in-depth (the merged PR #8 IDOR fix).
 func (s *Service) GetScanRun(ctx context.Context, userID, scanRunID uuid.UUID) (*db.ScanRun, error) {
-	q := s.queries()
-	scanRun, err := q.GetScanRunByID(ctx, scanRunID)
+	var scanRun db.ScanRun
+
+	err := platform.WithTenantTx(ctx, s.pool, userID, func(q *db.Queries) error {
+		var err error
+		scanRun, err = q.GetScanRunByID(ctx, scanRunID)
+		if err != nil {
+			return fmt.Errorf("get scan_run: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("get scan_run: %w", err)
+		return nil, err
 	}
+
 	if scanRun.UserID != userID {
 		return nil, sql.ErrNoRows
 	}
