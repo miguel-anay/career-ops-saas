@@ -1,9 +1,9 @@
 # Apply Progress — `rls-tenancy-wiring`
 
-> Phase: apply · Status: Seam 1 (foundation) complete, Seam 2 (`scan`) complete, Seam 3 (`tracker`) complete, Seams 4-8 not started
-> Branch: `feat/rls-foundation` (Seam 1) → `feat/rls-scan` (Seam 2, based on `main` including Seam 1's foundation) → `feat/rls-tracker` (Seam 3, based on `main` including Seam 1's foundation AND Seam 2's `scan` slice)
+> Phase: apply · Status: Seam 1 (foundation) complete, Seam 2 (`scan`) complete, Seam 3 (`tracker`) complete, Seam 4 (`auth`) complete, Seams 5-8 not started
+> Branch: `feat/rls-foundation` (Seam 1) → `feat/rls-scan` (Seam 2, based on `main` including Seam 1's foundation) → `feat/rls-tracker` (Seam 3, based on `main` including Seam 1's foundation AND Seam 2's `scan` slice) → `feat/rls-auth` (Seam 4, based on `main` including Seam 1+2+3)
 > Mode: Strict TDD (test runner: `make test-all` / `cd api && go test ./... -count=1`; `make test-rls` for pgTAP)
-> Batch: 3 of N (Seam 3 — `tracker` slice)
+> Batch: 4 of N (Seam 4 — `auth` slice)
 
 ## Seam 0 — Live-DB spike (D9) — already done before this batch
 
@@ -229,13 +229,51 @@ None new. Re-confirmed the same pre-existing (Seam-1-introduced, not tracker-spe
 
 3/3 Seam 3 tasks complete (T-134, T-135, T-136). Cumulative: 17/19 tasks across Seams 1-3 complete (T-122 and T-130's `make test-rls` portion remain deferred to the orchestrator's live pgTAP run, as in prior batches). Ready for verify, then ready for Seam 4-8 `sdd-apply` batches (parallelizable, any order, all depend only on Seam 1).
 
-### Remaining tasks (cumulative, as of end of Seam 3)
+---
 
-- [ ] T-122 — full `make test-rls` pgTAP suite against a live DB (orchestrator). Still not run (deferred since Seam 1/2; out of scope for Seam 3 as well)
+## Seam 4 — `auth` slice (T-137..T-139, complete, this batch, branch `feat/rls-auth` based on `main` post-Seam-1/2/3)
+
+### Files changed
+
+| File | Action | What was done |
+|------|--------|----------------|
+| `api/internal/auth/rls_integration_test.go` | Created | `TestAuthRLS_Integration` using the `rlsdb` harness: seeds users A and B, asserts B's `auth.GetUserByID(ctx, pool, callerUserID=B, userID=A)` returns `auth.ErrNotFound` (RLS `USING` denial under B's tenant tx), asserts A's own `auth.GetUserByID(ctx, pool, callerUserID=A, userID=A)` succeeds and returns A's row. |
+| `api/internal/auth/service.go` | Modified | `GetUserByID`'s signature changed from `(ctx, pool, userID)` to `(ctx, pool, callerUserID, userID)` — added `callerUserID` to scope the tenant tx (D6, minimal-diff option (b) from design §2: kept the existing query semantics but switched from a hand-rolled raw `pool.QueryRow` to the already-generated sqlc `q.GetUserByID(ctx, userID)` call, run inside `platform.WithTenantTx(ctx, pool, callerUserID, fn)` — no new sqlc query needed, `GetUserByID` already existed in `internal/db/users.sql.go` from a prior sqlc generation but had no caller). Added package-level `auth.ErrNotFound = errors.New("not found")` (auth had no existing not-found sentinel, unlike `cv`/`tracker`/`scan`). Maps `sql.ErrNoRows` (sqlc's `database/sql`-backed `Queries` surfaces this, not `pgx.ErrNoRows`, since `WithTenantTx` bridges the pgxpool via `stdlib.OpenDBFromPool`) to `ErrNotFound`. `auth.UpsertUser` and the underlying `auth_upsert_user` SQL function are **byte-identical, untouched** — verified via `git diff` showing zero lines changed in that function (proof by omission, Req 6). |
+
+### Deviations from design
+
+One: design §2's table for `auth`/`GetUserByID` says "the existing raw `SELECT` run via `tx`", and §2's gap note offers (a) add a sqlc query or (b) keep the raw SELECT wrapped in the tx as the smaller diff. On inspection, a sqlc `GetUserByID(ctx, id uuid.UUID) (User, error)` query method **already existed** in the generated `internal/db/users.sql.go` (likely generated for future use but never called) — so neither (a) nor literal (b) applied verbatim; the actual minimal-diff path was to call the pre-existing sqlc method instead of either hand-writing raw SQL inside the tx or running `sqlc generate` to add a new query. This is strictly smaller than both options in the design and changes no SQL files. Functionally identical output to the original 7-field manual `Scan` (verified — `db.User` struct fields match 1:1, `sql.NullString`/`json.RawMessage` handling is internal to the sqlc-generated scan, so the manual `cvMarkdown`/`profileJSON` post-processing in the old code became dead code and was removed).
+
+Second, minor: `GetUserByID`'s signature gained a second `uuid.UUID` parameter (`callerUserID`) ahead of the original `userID`, since the function had no `userID`-vs-caller distinction before (it took only one ID and used it both as the row to fetch and implicitly as "trusted from JWT"). This is consistent with D6's framing ("asked to look up A's user ID" while "scoped to B") and was the only way to express the cross-tenant scenario without inventing a second function. There is currently no production caller of `GetUserByID` (`rg` found zero call sites outside its own definition and the new test) — the `Refresh` handler re-issues tokens from JWT claims without re-fetching the user row, so this signature change has zero blast radius on existing behavior today, satisfying Req 5 vacuously for this function while still proving the RLS contract for whenever a caller is wired in.
+
+### Issues found
+
+None. Build (`go build ./...`) and vet (`go vet ./...`) clean. No import cycle introduced by `auth` importing `platform` (one-way edge, same as `cv`/`scan`/`tracker` already established in Seam 1-3).
+
+### Workload / PR boundary
+
+- Mode: chained PR slice (`stacked-to-main`)
+- Current work unit: PR-4 — `auth` slice (Seam 4 only, T-137..T-139)
+- Boundary: starts from `main` (post-Seam-1/2/3 merge) on branch `feat/rls-auth`; ends at a fully compiling, fully-passing state with `auth.GetUserByID` wired through `platform.WithTenantTx`, the new integration test passing against a live NULLIF-migrated DB, `auth.UpsertUser`/`auth_upsert_user` verified untouched, and zero changes to any other domain (`scan`, `tracker`, `jobs`, `evaluate`, `companies`, `cv` untouched, per scope)
+- Estimated review budget impact: ~75 hand-written lines (service.go net diff ~32 lines per `git diff --stat`, integration test ~50 lines) — well under the 400-line budget
+
+### Test results
+
+`cd api && go test ./internal/auth/... -count=1` (with `TEST_DATABASE_URL` set against the live docker-compose `postgres` service, migrated through `003_rls_nullif.sql`): **15/15 test functions pass** — 14 pre-existing tests (JWT issue/verify round-trips, `TestGoogleCallbackCreatesUser` x3 subtests, `TestRefreshTokenRotation`, `TestRefreshTokenRotation_MissingCookie`, `TestExpiredAccessToken401`, `TestExpiredAccessToken_ResponseContainsError`, `TestTokensAreDistinct`, `TestIssueAccessToken_DifferentPlans` x3 subtests) unmodified and green, plus the new `TestAuthRLS_Integration` (2 subtests: cross-tenant denial, owner success) green. Without `TEST_DATABASE_URL` set, the integration test skips cleanly (`t.Skip`) and the rest of the suite (`make test-go`, full repo) stays green across all packages (`auth`, `companies`, `cv`, `evaluate`, `jobs`, `middleware`, `platform`, `scan`, `testsupport/rlsdb`, `tracker`, `ws`).
+
+RED confirmed before T-138: writing the test first against the old 3-arg `GetUserByID(ctx, pool, userID)` signature produced a compile-time RED (`too many arguments in call to auth.GetUserByID`), proving the test exercises behavior that did not yet exist, before the signature/impl change in T-138 made it pass.
+
+### Status
+
+3/3 Seam 4 tasks complete (T-137, T-138, T-139). Cumulative: 20/22 tasks across Seams 1-4 complete (T-122 and T-130's `make test-rls` pgTAP portions remain deferred to the orchestrator's live pgTAP run, as in prior batches). Ready for verify, then ready for Seam 5-8 `sdd-apply` batches (parallelizable, any order, all depend only on Seam 1).
+
+### Remaining tasks (cumulative, as of end of Seam 4)
+
+- [ ] T-122 — full `make test-rls` pgTAP suite against a live DB (orchestrator). Still not run (deferred since Seam 1/2; out of scope for Seam 3/4 as well)
 - [ ] T-130's `make test-rls` portion — same as above, not run in this batch
 - [x] Seam 2 (`scan`) — T-131..T-133
 - [x] Seam 3 (`tracker`) — T-134..T-136
-- [ ] Seam 4 (`auth`) — T-137..T-139
+- [x] Seam 4 (`auth`) — T-137..T-139
 - [ ] Seam 5 (`jobs`) — T-140..T-142
 - [ ] Seam 6 (`evaluate`) — T-143..T-145
 - [ ] Seam 7 (`companies`) — T-146..T-148

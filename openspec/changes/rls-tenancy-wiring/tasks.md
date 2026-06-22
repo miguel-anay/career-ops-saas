@@ -105,9 +105,9 @@ Dependency edges: **Seam 0 → Seam 1** (the spike's empirical result confirms t
 
 | ID | Type | Description | File(s) |
 |----|------|--------------|---------|
-| T-137 | test | Write `auth/rls_integration_test.go`: seed users A and B via `rlsdb.SeedUser` (which itself calls `auth_upsert_user`, proving that path stays untouched/SECURITY DEFINER); assert `auth.Service.GetUserByID` run under a tenant tx scoped to B but asked to look up A's user ID returns no row / a not-found condition; assert `GetUserByID` scoped to A returns A's own row correctly — Req 2 scenario "auth.GetUserByID denies cross-tenant read (refresh-token path)" | `api/internal/auth/rls_integration_test.go` (new) |
-| T-138 | impl | Wrap `auth.GetUserByID`'s existing raw `SELECT` in `platform.WithTenantTx` (minimal-diff option (b) from design §2 — no sqlc regen required for this slice). Map `sql.ErrNoRows` to the existing not-found error path. Do not touch `auth.UpsertUser`/`auth_upsert_user` — makes T-137 green | `api/internal/auth/service.go` |
-| T-139 | verify | Run `cd api && go test ./internal/auth/... -count=1` — confirm existing auth tests (OAuth flow, refresh rotation) pass unmodified | n/a (verification step) |
+| T-137 | test | [x] Write `auth/rls_integration_test.go`: seed users A and B via `rlsdb.SeedUser` (which itself calls `auth_upsert_user`, proving that path stays untouched/SECURITY DEFINER); assert `auth.Service.GetUserByID` run under a tenant tx scoped to B but asked to look up A's user ID returns no row / a not-found condition; assert `GetUserByID` scoped to A returns A's own row correctly — Req 2 scenario "auth.GetUserByID denies cross-tenant read (refresh-token path)" | `api/internal/auth/rls_integration_test.go` (new) |
+| T-138 | impl | [x] Wrap `auth.GetUserByID`'s existing raw `SELECT` in `platform.WithTenantTx` (minimal-diff option (b) from design §2 — no sqlc regen required for this slice). Map `sql.ErrNoRows` to the existing not-found error path. Do not touch `auth.UpsertUser`/`auth_upsert_user` — makes T-137 green | `api/internal/auth/service.go` |
+| T-139 | verify | [x] Run `cd api && go test ./internal/auth/... -count=1` — confirm existing auth tests (OAuth flow, refresh rotation) pass unmodified | n/a (verification step) |
 
 **Sequencing within 4:** T-137 → T-138 → T-139, strictly sequential.
 
