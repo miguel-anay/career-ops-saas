@@ -2,11 +2,8 @@ package jobs
 
 import (
 	"context"
-	"database/sql"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/stdlib"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/miguel-anay/career-ops-saas/api/internal/db"
 )
 
@@ -15,15 +12,12 @@ type Repo struct {
 	q *db.Queries
 }
 
-// NewRepo creates a new Repo using a pgxpool by wrapping it via stdlib.
-func NewRepo(pool *pgxpool.Pool) *Repo {
-	sqlDB := stdlib.OpenDBFromPool(pool)
-	return &Repo{q: db.New(sqlDB)}
-}
-
-// newRepoFromSQL creates a Repo from an existing *sql.DB (for tenant-scoped use).
-func newRepoFromSQL(sqlDB *sql.DB) *Repo {
-	return &Repo{q: db.New(sqlDB)}
+// newRepoFromQueries creates a Repo from a *db.Queries already bound to a
+// tenant-scoped transaction (see platform.WithTenantTx). This is the only
+// constructor — every jobs query must run with app.current_user_id set, so
+// there is no raw-pool constructor here.
+func newRepoFromQueries(q *db.Queries) *Repo {
+	return &Repo{q: q}
 }
 
 // ListByUser returns a paginated list of jobs for the given user.
