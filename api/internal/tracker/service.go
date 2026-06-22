@@ -8,8 +8,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/miguel-anay/career-ops-saas/api/internal/db"
+	"github.com/miguel-anay/career-ops-saas/api/internal/platform"
 )
 
 // ValidStatuses contains the allowed application status values.
@@ -34,12 +34,11 @@ func NewService(pool *pgxpool.Pool) *Service {
 	return &Service{pool: pool}
 }
 
-func (s *Service) queries() *db.Queries {
-	sqlDB := stdlib.OpenDBFromPool(s.pool)
-	return db.New(sqlDB)
-}
-
 // ListApplications returns a paginated list of applications for the given user.
+//
+// The read runs inside a platform.WithTenantTx scoped to userID, so RLS
+// scopes ListApplicationsByUser to the caller's own rows at the DB layer
+// (in addition to the existing app-layer user_id filter).
 func (s *Service) ListApplications(ctx context.Context, userID uuid.UUID, page, limit int) ([]db.Application, error) {
 	if limit <= 0 {
 		limit = 20
@@ -49,11 +48,15 @@ func (s *Service) ListApplications(ctx context.Context, userID uuid.UUID, page, 
 	}
 	offset := (page - 1) * limit
 
-	q := s.queries()
-	apps, err := q.ListApplicationsByUser(ctx, db.ListApplicationsByUserParams{
-		UserID: userID,
-		Limit:  int32(limit),
-		Offset: int32(offset),
+	var apps []db.Application
+	err := platform.WithTenantTx(ctx, s.pool, userID, func(q *db.Queries) error {
+		var err error
+		apps, err = q.ListApplicationsByUser(ctx, db.ListApplicationsByUserParams{
+			UserID: userID,
+			Limit:  int32(limit),
+			Offset: int32(offset),
+		})
+		return err
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list applications: %w", err)
@@ -63,6 +66,16 @@ func (s *Service) ListApplications(ctx context.Context, userID uuid.UUID, page, 
 
 // UpdateApplication updates the status and/or notes of an application.
 // Only non-nil fields are updated. At least one of status or notes must be provided.
+//
+// The UPDATE statement(s) run inside a platform.WithTenantTx scoped to
+// userID, so RLS USING/WITH CHECK is the guard: a row owned by another
+// tenant is invisible to the UPDATE's target scan (0 rows affected ->
+// sql.ErrNoRows -> ErrNotFound), and WITH CHECK rejects any attempt to
+// write a foreign user_id. Per design.md D8, the post-UPDATE
+// `if updated.UserID != userID` check is intentionally DROPPED — it used to
+// run AFTER an unscoped UPDATE had already mutated the row, so it was
+// dead-for-security even before this change; RLS is now the only guard and
+// it is unconditional.
 func (s *Service) UpdateApplication(ctx context.Context, userID, appID uuid.UUID, status *string, notes *string) (*db.Application, error) {
 	if status == nil && notes == nil {
 		return nil, fmt.Errorf("at least one of status or notes must be provided")
@@ -74,61 +87,38 @@ func (s *Service) UpdateApplication(ctx context.Context, userID, appID uuid.UUID
 		}
 	}
 
-	q := s.queries()
-
 	var updated db.Application
-	var err error
 
-	if status != nil && notes != nil {
-		// Update status first, then notes — simple sequential updates.
-		updated, err = q.UpdateApplicationStatus(ctx, db.UpdateApplicationStatusParams{
-			ID:     appID,
-			Status: db.AppStatusT(*status),
-		})
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return nil, ErrNotFound
+	err := platform.WithTenantTx(ctx, s.pool, userID, func(q *db.Queries) error {
+		var err error
+
+		if status != nil {
+			updated, err = q.UpdateApplicationStatus(ctx, db.UpdateApplicationStatusParams{
+				ID:     appID,
+				Status: db.AppStatusT(*status),
+			})
+			if err != nil {
+				return err
 			}
-			return nil, fmt.Errorf("update status: %w", err)
 		}
-		if updated.UserID != userID {
+
+		if notes != nil {
+			updated, err = q.UpdateApplicationNotes(ctx, db.UpdateApplicationNotesParams{
+				ID:    appID,
+				Notes: sql.NullString{String: *notes, Valid: true},
+			})
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
-		updated, err = q.UpdateApplicationNotes(ctx, db.UpdateApplicationNotesParams{
-			ID:    appID,
-			Notes: sql.NullString{String: *notes, Valid: true},
-		})
-		if err != nil {
-			return nil, fmt.Errorf("update notes: %w", err)
-		}
-	} else if status != nil {
-		updated, err = q.UpdateApplicationStatus(ctx, db.UpdateApplicationStatusParams{
-			ID:     appID,
-			Status: db.AppStatusT(*status),
-		})
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return nil, ErrNotFound
-			}
-			return nil, fmt.Errorf("update status: %w", err)
-		}
-		if updated.UserID != userID {
-			return nil, ErrNotFound
-		}
-	} else {
-		updated, err = q.UpdateApplicationNotes(ctx, db.UpdateApplicationNotesParams{
-			ID:    appID,
-			Notes: sql.NullString{String: *notes, Valid: true},
-		})
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return nil, ErrNotFound
-			}
-			return nil, fmt.Errorf("update notes: %w", err)
-		}
-		if updated.UserID != userID {
-			return nil, ErrNotFound
-		}
+		return nil, fmt.Errorf("update application: %w", err)
 	}
 
 	return &updated, nil
