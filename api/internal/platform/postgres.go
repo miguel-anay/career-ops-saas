@@ -23,6 +23,14 @@ func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	return pool, nil
 }
 
+// PoolQueries returns a *db.Queries bound directly to the pool with NO
+// transaction and NO tenant GUC. Use this ONLY for tables that have no RLS
+// policy (e.g. companies_catalog). Every tenant-table access MUST go through
+// WithTenantTx instead, or RLS will not be engaged.
+func PoolQueries(pool *pgxpool.Pool) *db.Queries {
+	return db.New(stdlib.OpenDBFromPool(pool))
+}
+
 // WithTenantTx runs fn inside a transaction with app.current_user_id set via
 // set_config(..., true) (transaction-local), so RLS policies on tenant
 // tables are enforced for the duration of fn. Commits if fn returns nil,

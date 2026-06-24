@@ -23,7 +23,7 @@ func (q *Queries) DeleteWatchedCompany(ctx context.Context, id uuid.UUID) error 
 }
 
 const getWatchedCompanyByID = `-- name: GetWatchedCompanyByID :one
-SELECT id, user_id, name, careers_url, provider_id, ats_api_url, enabled, created_at FROM watched_companies
+SELECT id, user_id, name, careers_url, provider_id, ats_api_url, enabled, company_id, created_at FROM watched_companies
 WHERE id = $1
 LIMIT 1
 `
@@ -39,6 +39,7 @@ func (q *Queries) GetWatchedCompanyByID(ctx context.Context, id uuid.UUID) (Watc
 		&i.ProviderID,
 		&i.AtsApiUrl,
 		&i.Enabled,
+		&i.CompanyID,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -51,10 +52,11 @@ INSERT INTO watched_companies (
   careers_url,
   provider_id,
   ats_api_url,
-  enabled
+  enabled,
+  company_id
 ) VALUES (
-  $1, $2, $3, $4, $5, $6
-) RETURNING id, user_id, name, careers_url, provider_id, ats_api_url, enabled, created_at
+  $1, $2, $3, $4, $5, $6, $7
+) RETURNING id, user_id, name, careers_url, provider_id, ats_api_url, enabled, company_id, created_at
 `
 
 type InsertWatchedCompanyParams struct {
@@ -64,6 +66,7 @@ type InsertWatchedCompanyParams struct {
 	ProviderID sql.NullString `json:"provider_id"`
 	AtsApiUrl  sql.NullString `json:"ats_api_url"`
 	Enabled    bool           `json:"enabled"`
+	CompanyID  uuid.NullUUID  `json:"company_id"`
 }
 
 func (q *Queries) InsertWatchedCompany(ctx context.Context, arg InsertWatchedCompanyParams) (WatchedCompany, error) {
@@ -74,6 +77,7 @@ func (q *Queries) InsertWatchedCompany(ctx context.Context, arg InsertWatchedCom
 		arg.ProviderID,
 		arg.AtsApiUrl,
 		arg.Enabled,
+		arg.CompanyID,
 	)
 	var i WatchedCompany
 	err := row.Scan(
@@ -84,13 +88,14 @@ func (q *Queries) InsertWatchedCompany(ctx context.Context, arg InsertWatchedCom
 		&i.ProviderID,
 		&i.AtsApiUrl,
 		&i.Enabled,
+		&i.CompanyID,
 		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const listEnabledWatchedCompaniesByUser = `-- name: ListEnabledWatchedCompaniesByUser :many
-SELECT id, user_id, name, careers_url, provider_id, ats_api_url, enabled, created_at FROM watched_companies
+SELECT id, user_id, name, careers_url, provider_id, ats_api_url, enabled, company_id, created_at FROM watched_companies
 WHERE user_id = $1
   AND enabled = true
 ORDER BY created_at DESC
@@ -113,6 +118,7 @@ func (q *Queries) ListEnabledWatchedCompaniesByUser(ctx context.Context, userID 
 			&i.ProviderID,
 			&i.AtsApiUrl,
 			&i.Enabled,
+			&i.CompanyID,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -129,7 +135,7 @@ func (q *Queries) ListEnabledWatchedCompaniesByUser(ctx context.Context, userID 
 }
 
 const listWatchedCompaniesByUser = `-- name: ListWatchedCompaniesByUser :many
-SELECT id, user_id, name, careers_url, provider_id, ats_api_url, enabled, created_at FROM watched_companies
+SELECT id, user_id, name, careers_url, provider_id, ats_api_url, enabled, company_id, created_at FROM watched_companies
 WHERE user_id = $1
 ORDER BY created_at DESC
 `
@@ -151,6 +157,7 @@ func (q *Queries) ListWatchedCompaniesByUser(ctx context.Context, userID uuid.UU
 			&i.ProviderID,
 			&i.AtsApiUrl,
 			&i.Enabled,
+			&i.CompanyID,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
