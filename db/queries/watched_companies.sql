@@ -15,9 +15,10 @@ INSERT INTO watched_companies (
   careers_url,
   provider_id,
   ats_api_url,
-  enabled
+  enabled,
+  company_id
 ) VALUES (
-  $1, $2, $3, $4, $5, $6
+  $1, $2, $3, $4, $5, $6, $7
 ) RETURNING *;
 
 -- name: DeleteWatchedCompany :exec

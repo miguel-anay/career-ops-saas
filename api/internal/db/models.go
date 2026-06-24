@@ -206,6 +206,15 @@ type Application struct {
 	UpdatedAt time.Time       `json:"updated_at"`
 }
 
+type CompaniesCatalog struct {
+	ID         uuid.UUID      `json:"id"`
+	Name       string         `json:"name"`
+	CareersUrl string         `json:"careers_url"`
+	ProviderID string         `json:"provider_id"`
+	AtsApiUrl  sql.NullString `json:"ats_api_url"`
+	CreatedAt  time.Time      `json:"created_at"`
+}
+
 type Cv struct {
 	ID        uuid.UUID `json:"id"`
 	UserID    uuid.UUID `json:"user_id"`
@@ -283,5 +292,6 @@ type WatchedCompany struct {
 	ProviderID sql.NullString `json:"provider_id"`
 	AtsApiUrl  sql.NullString `json:"ats_api_url"`
 	Enabled    bool           `json:"enabled"`
+	CompanyID  uuid.NullUUID  `json:"company_id"`
 	CreatedAt  time.Time      `json:"created_at"`
 }
