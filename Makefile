@@ -1,4 +1,13 @@
-.PHONY: test test-go test-worker test-web test-rls test-all
+.PHONY: test test-go test-worker test-web test-rls test-all pgboss-install
+
+# Provision the pg-boss v10 queue schema (admin-side) and grant the runtime
+# role (app_user) the DML it needs. Run ONCE per environment before starting
+# the worker — the worker runs with migrate:false and cannot self-install
+# (app_user has no CREATE). Override PGBOSS_ADMIN_URL for non-local DBs.
+# Requires worker deps installed (cd worker && npm install).
+pgboss-install:
+	cd worker && PGBOSS_ADMIN_URL="$${PGBOSS_ADMIN_URL:-postgres://careerops:careerops@localhost:5432/careerops}" node scripts/install-pgboss.mjs
+	docker compose exec -T postgres psql -U careerops -d careerops < db/pgboss_grants.sql
 
 test-go:
 	cd api && go test ./... -count=1
