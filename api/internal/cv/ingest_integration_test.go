@@ -60,11 +60,11 @@ func TestCVIngest_RLS_Integration(t *testing.T) {
 	require.NoError(t, err, "admin connection (set TEST_ADMIN_DATABASE_URL for a superuser/owner DSN)")
 	defer adminPool.Close()
 
-	// pg-boss creates its schema at worker boot; a bare migrated DB has none.
-	// Create a minimal stand-in sufficient for queue.Enqueue's INSERT so the
-	// API enqueue path runs end-to-end. This is a test fixture, not the real
-	// pg-boss schema.
-	ensurePgbossStandin(ctx, t, adminPool)
+	// pg-boss creates its schema out-of-band (worker/scripts/install-pgboss.mjs,
+	// run by the admin). Provision the REAL v10 schema + register the
+	// ingest-cv queue here so queue.Enqueue's INSERT (which JOINs against
+	// pgboss.queue) actually routes a job into a partition end-to-end.
+	ensurePgbossSchema(ctx, t, adminPool, "ingest-cv")
 
 	svc := cv.NewService(appPool)
 
@@ -153,20 +153,20 @@ func TestCVIngest_RLS_Integration(t *testing.T) {
 	})
 }
 
-// ensurePgbossStandin creates a minimal pgboss.job table matching the columns
-// queue.Enqueue inserts, and grants app_user INSERT, so the enqueue path runs
-// against a bare migrated DB. The real schema is created by the pg-boss runtime.
+// ensurePgbossSchema installs the REAL pg-boss v10 schema and registers
+// queueName, so queue.Enqueue's INSERT (which JOINs against pgboss.queue)
+// runs against a bare migrated DB exactly as it would in production.
 //
-// Delegates to rlsdb.EnsurePgbossStandin (the same DDL, behind a
-// pg_advisory_xact_lock) rather than running this duplicate inline copy
-// directly. This file predates the shared testsupport/rlsdb harness
-// (it's from the ingest-cv change); a second, lock-free copy of the same
-// "CREATE SCHEMA/TABLE IF NOT EXISTS" DDL racing against the harness's
-// locked copy from other packages caused intermittent
-// "tuple concurrently updated" failures when test packages ran in parallel.
-func ensurePgbossStandin(ctx context.Context, t *testing.T, admin *pgxpool.Pool) {
+// Delegates to rlsdb.EnsurePgbossSchema (the same generated DDL, behind a
+// pg_advisory_xact_lock) rather than running a duplicate inline copy
+// directly. This file predates the shared testsupport/rlsdb harness (it's
+// from the ingest-cv change); a second, lock-free copy of the same DDL
+// racing against the harness's locked copy from other packages caused
+// intermittent "tuple concurrently updated" failures when test packages
+// ran in parallel.
+func ensurePgbossSchema(ctx context.Context, t *testing.T, admin *pgxpool.Pool, queueName string) {
 	t.Helper()
-	(&rlsdb.Harness{AdminPool: admin}).EnsurePgbossStandin(ctx, t)
+	(&rlsdb.Harness{AdminPool: admin}).EnsurePgbossSchema(ctx, t, queueName)
 }
 
 // mustUpsertUser seeds a real user row via the auth_upsert_user SECURITY

@@ -29,7 +29,7 @@ import (
 func TestScanRLS_Integration(t *testing.T) {
 	ctx := context.Background()
 	h := rlsdb.New(ctx, t)
-	h.EnsurePgbossStandin(ctx, t)
+	h.EnsurePgbossSchema(ctx, t, "scan-company")
 
 	userA := h.SeedUser(ctx, t, "scan-itest-a@test.invalid", "scan_itest_google_a")
 	userB := h.SeedUser(ctx, t, "scan-itest-b@test.invalid", "scan_itest_google_b")
