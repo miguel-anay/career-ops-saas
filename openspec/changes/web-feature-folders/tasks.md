@@ -53,22 +53,22 @@ PR1 itself (~620-680 lines) still exceeds the 400-line single-PR budget. Per aut
 
 ## Phase 4: Hooks Migration (PR2)
 
-- [ ] T-203 Create web/features/jobs/hooks.ts — move useScanProgress (and ScanEvent type) verbatim from web/hooks/useScanProgress.ts; update web/features/jobs/JobsDashboard.tsx import to `./hooks`
-- [ ] T-204 Create web/features/cv/hooks.ts — move useJobProgress (and JobProgressStatus/JobProgressPayload types) verbatim from web/hooks/useJobProgress.ts; update web/app/cv/ingest/page.tsx import to `@/features/cv/hooks`
-- [ ] T-205 Delete web/hooks/useScanProgress.ts and web/hooks/useJobProgress.ts
-- [ ] T-206 Move web/__tests__/hooks/useScanProgress.test.ts -> web/__tests__/features/jobs/hooks.test.ts; update its dynamic import path from '../../hooks/useScanProgress' to '../../../features/jobs/hooks'
-- [ ] T-207 Move web/__tests__/hooks/useJobProgress.test.tsx -> web/__tests__/features/cv/hooks.test.tsx; update its dynamic import path from '../../hooks/useJobProgress' to '../../../features/cv/hooks'
-- [ ] T-208 Update web/__tests__/app/page.test.tsx: change `vi.mock('../../hooks/useScanProgress')` to `vi.mock('../../features/jobs/hooks')` in the SAME commit as T-203 (per spec: mock path update is atomic with the move)
-- [ ] T-209 Update web/__tests__/app/ingest-cv.test.tsx: change `vi.mock('../../hooks/useJobProgress')` to `vi.mock('../../features/cv/hooks')` in the SAME commit as T-204
-- [ ] T-210 Run `cd web && npm test -- --run`; verify no test still references the old hooks/ paths (grep vi.mock + dynamic import for 'hooks/useScanProgress' and 'hooks/useJobProgress' returns zero matches in web/__tests__/**)
+- [x] T-203 Create web/features/jobs/hooks.ts — move useScanProgress (and ScanEvent type) verbatim from web/hooks/useScanProgress.ts; update web/features/jobs/JobsDashboard.tsx import to `./hooks`
+- [x] T-204 Create web/features/cv/hooks.ts — move useJobProgress (and JobProgressStatus/JobProgressPayload types) verbatim from web/hooks/useJobProgress.ts; update web/app/cv/ingest/page.tsx import to `@/features/cv/hooks`
+- [x] T-205 Delete web/hooks/useScanProgress.ts and web/hooks/useJobProgress.ts
+- [x] T-206 Move web/__tests__/hooks/useScanProgress.test.ts -> web/__tests__/features/jobs/hooks.test.ts; update its dynamic import path from '../../hooks/useScanProgress' to '../../../features/jobs/hooks'
+- [x] T-207 Move web/__tests__/hooks/useJobProgress.test.tsx -> web/__tests__/features/cv/hooks.test.tsx; update its dynamic import path from '../../hooks/useJobProgress' to '../../../features/cv/hooks'
+- [x] T-208 Update web/__tests__/app/page.test.tsx: change `vi.mock('../../hooks/useScanProgress')` to `vi.mock('../../features/jobs/hooks')` in the SAME commit as T-203 (per spec: mock path update is atomic with the move)
+- [x] T-209 Update web/__tests__/app/ingest-cv.test.tsx: change `vi.mock('../../hooks/useJobProgress')` to `vi.mock('../../features/cv/hooks')` in the SAME commit as T-204
+- [x] T-210 Run `cd web && npm test -- --run`; verify no test still references the old hooks/ paths (grep vi.mock + dynamic import for 'hooks/useScanProgress' and 'hooks/useJobProgress' returns zero matches in web/__tests__/**)
 
 ## Phase 5: lib/api.ts Split (PR2, continued)
 
-- [ ] T-211 Create web/features/cv/api.ts — move postIngest, getIngestion, IngestRunResponse, IngestionStatus verbatim from web/lib/api.ts; import apiGet/apiPost from '@/lib/api'
-- [ ] T-212 Remove postIngest/getIngestion/IngestRunResponse/IngestionStatus from web/lib/api.ts — keep only apiGet/apiPost/apiPatch/apiDelete + refreshTokens/request internals
-- [ ] T-213 Update web/app/cv/ingest/page.tsx imports: postIngest/getIngestion/IngestRunResponse/IngestionStatus now from '@/features/cv/api' (apiGet/apiPost imports, if any direct usage remains, stay from '@/lib/api')
-- [ ] T-214 Update web/__tests__/app/ingest-cv.test.tsx: change `vi.mock('../../lib/api')` postIngest/getIngestion mock targets to `vi.mock('../../features/cv/api')` in the SAME commit as T-211/T-212 — verify web/__tests__/lib/api.test.ts (tests only apiGet) is untouched and still passes
-- [ ] T-215 Run full `cd web && npm test -- --run`; confirm PR2 exit criteria — all tests green, no stale vi.mock path remains anywhere in web/__tests__/** (per spec "No test left mocking a stale path")
+- [x] T-211 Create web/features/cv/api.ts — move postIngest, getIngestion, IngestRunResponse, IngestionStatus verbatim from web/lib/api.ts; import apiGet/apiPost from '@/lib/api'
+- [x] T-212 Remove postIngest/getIngestion/IngestRunResponse/IngestionStatus from web/lib/api.ts — keep only apiGet/apiPost/apiPatch/apiDelete + refreshTokens/request internals
+- [x] T-213 Update web/app/cv/ingest/page.tsx imports: postIngest/getIngestion/IngestRunResponse/IngestionStatus now from '@/features/cv/api' (apiGet/apiPost imports, if any direct usage remains, stay from '@/lib/api')
+- [x] T-214 Update web/__tests__/app/ingest-cv.test.tsx: change `vi.mock('../../lib/api')` postIngest/getIngestion mock targets to `vi.mock('../../features/cv/api')` in the SAME commit as T-211/T-212 — verify web/__tests__/lib/api.test.ts (tests only apiGet) is untouched and still passes
+- [x] T-215 Run full `cd web && npm test -- --run`; confirm PR2 exit criteria — all tests green, no stale vi.mock path remains anywhere in web/__tests__/** (per spec "No test left mocking a stale path")
 
 ## Phase 6: Deferred / Optional (only if PR2 budget allows — cut to follow-up otherwise)
 

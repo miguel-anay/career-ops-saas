@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/table'
 import { apiGet, apiPost } from '@/lib/api'
 import { isAuthenticated } from '@/lib/auth'
-import { useScanProgress } from '@/hooks/useScanProgress'
+import { useScanProgress } from './hooks'
 import type { Job, JobsResponse } from './types'
 
 const STATUS_COLORS: Record<string, 'default' | 'secondary' | 'outline' | 'destructive'> = {
