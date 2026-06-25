@@ -99,7 +99,7 @@ describe('Dashboard page (app/page.tsx)', () => {
     })
   })
 
-  it('redirects to /login when not authenticated', async () => {
+  it('redirects to /login when not authenticated, and does NOT fetch', async () => {
     mockIsAuthenticated.mockReturnValue(false)
 
     render(<DashboardPage />)
@@ -107,5 +107,9 @@ describe('Dashboard page (app/page.tsx)', () => {
     await waitFor(() => {
       expect(mockRouter.replace).toHaveBeenCalledWith('/login')
     })
+    // Behavior-preservation guard: an unauthenticated render must not fire an
+    // API call (it would 401). The feature/composer split must not decouple
+    // the auth guard from the data fetch.
+    expect(mockApiGet).not.toHaveBeenCalled()
   })
 })
