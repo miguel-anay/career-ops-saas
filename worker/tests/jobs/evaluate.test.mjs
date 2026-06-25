@@ -1,5 +1,16 @@
 import { vi, describe, it, expect, beforeEach } from 'vitest'
 
+// The handler under test wires real adapters (AnthropicEvaluator,
+// PgEvaluationRepository) into the EvaluateJob use case. Rather than mocking
+// relative-path modules and counting tenantQuery calls (the old brittle
+// approach — see PR2 design), we mock only the three external dependencies
+// the adapters wrap (`tenantQuery`, `buildEvaluationPrompt`, `evaluate`) and
+// assert through observable side effects: the same 4 tenantQuery writes the
+// repository contract guarantees, with correct values. The 4-write
+// order/shape contract itself is fully covered (and is the source of truth)
+// in `tests/adapters/pg-evaluation-repository.test.mjs` — this test exists to
+// prove the handler wires everything together correctly end-to-end.
+
 const mockTenantQuery = vi.fn()
 const mockBuildEvaluationPrompt = vi.fn()
 const mockAnthropicEvaluate = vi.fn()
@@ -84,6 +95,11 @@ Tier: 1 — Verified Direct
     // Should have called tenantQuery 4 times (insert app, insert report, upsert usage, update job)
     expect(mockTenantQuery).toHaveBeenCalledTimes(4)
 
+    // applications INSERT carries the parsed overall score and no status note
+    const appCall = mockTenantQuery.mock.calls[0]
+    expect(appCall[1]).toContain('INSERT INTO applications')
+    expect(appCall[2]).toEqual(['user-1', 'job-1', 4.1, null])
+
     // Usage upsert call should increment evaluations_count
     const usageCall = mockTenantQuery.mock.calls[2]
     expect(usageCall[1]).toContain('evaluations_count')
@@ -125,6 +141,12 @@ Tier: 1 — Verified Direct
       call => typeof call[1] === 'string' && call[1].includes('reports')
     )
     expect(reportInsertCall).toBeDefined()
+
+    // applications INSERT carries the parse-error status note and null score
+    const appCall = mockTenantQuery.mock.calls.find(
+      call => typeof call[1] === 'string' && call[1].includes('applications')
+    )
+    expect(appCall[2]).toEqual(['user-1', 'job-1', null, 'Evaluation completed (parse error in blocks)'])
   })
 
   it('stores parse_error:true in blocks_json when response is unparseable', async () => {
