@@ -62,9 +62,51 @@ func TestHarness_WithTenantTx_CrossTenantDenial(t *testing.T) {
 	})
 }
 
+// TestHarness_EnsurePgbossSchema_RegistersQueue proves the harness
+// provisions the REAL pg-boss v10 partitioned schema (not the old
+// hand-rolled flat stand-in) and registers a queue by name, so a job can
+// actually be routed into a partition by name afterward. This is the RED
+// test for the EnsurePgbossSchema rewrite (was EnsurePgbossStandin) — it
+// references methods/columns that only exist once the real v10 schema is
+// installed (pgboss.queue, snake_case pgboss.job columns).
+func TestHarness_EnsurePgbossSchema_RegistersQueue(t *testing.T) {
+	ctx := context.Background()
+	h := rlsdb.New(ctx, t)
+
+	h.EnsurePgbossSchema(ctx, t, "rlsdb-harness-test-queue")
+
+	// pgboss.queue is the v10 registry table — it does not exist at all in
+	// the old hand-rolled flat fixture, so this assertion only passes
+	// against the real schema.
+	var policy string
+	err := h.AdminPool.QueryRow(ctx,
+		`SELECT policy FROM pgboss.queue WHERE name = $1`, "rlsdb-harness-test-queue",
+	).Scan(&policy)
+	require.NoError(t, err, "queue must be registered in the real pgboss.queue table")
+	require.Equal(t, "standard", policy, "createQueue default policy must be 'standard'")
+
+	t.Run("calling again with the same queue name is idempotent", func(t *testing.T) {
+		require.NotPanics(t, func() {
+			h.EnsurePgbossSchema(ctx, t, "rlsdb-harness-test-queue")
+		})
+	})
+
+	t.Run("registering a second distinct queue name does not remove the first", func(t *testing.T) {
+		h.EnsurePgbossSchema(ctx, t, "rlsdb-harness-test-queue-2")
+
+		var count int
+		err := h.AdminPool.QueryRow(ctx,
+			`SELECT count(*) FROM pgboss.queue WHERE name IN ($1, $2)`,
+			"rlsdb-harness-test-queue", "rlsdb-harness-test-queue-2",
+		).Scan(&count)
+		require.NoError(t, err)
+		require.Equal(t, 2, count)
+	})
+}
+
 // TestHarness_EmptyGUC_DeniesCleanly proves that, AFTER migration
 // 003_rls_nullif.sql is applied, a connection whose app.current_user_id GUC
-// has reset to '' (the pooled-connection state once a prior tenant tx
+// has reset to ” (the pooled-connection state once a prior tenant tx
 // ended) denies cleanly instead of raising 22P02 invalid input syntax for
 // type uuid. This is the Go-level mirror of db/tests/nullif_guc.test.sql,
 // exercised through the same AppPool every domain service uses.

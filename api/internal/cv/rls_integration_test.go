@@ -31,7 +31,7 @@ import (
 func TestCVRLS_Integration(t *testing.T) {
 	ctx := context.Background()
 	h := rlsdb.New(ctx, t)
-	h.EnsurePgbossStandin(ctx, t)
+	h.EnsurePgbossSchema(ctx, t, "generate-pdf")
 
 	userA := h.SeedUser(ctx, t, "cv-itest-a@test.invalid", "cv_itest_google_a")
 	userB := h.SeedUser(ctx, t, "cv-itest-b@test.invalid", "cv_itest_google_b")

@@ -31,7 +31,7 @@ import (
 func TestEvaluateRLS_Integration(t *testing.T) {
 	ctx := context.Background()
 	h := rlsdb.New(ctx, t)
-	h.EnsurePgbossStandin(ctx, t)
+	h.EnsurePgbossSchema(ctx, t, "evaluate-job")
 
 	userA := h.SeedUser(ctx, t, "evaluate-itest-a@test.invalid", "evaluate_itest_google_a")
 	userB := h.SeedUser(ctx, t, "evaluate-itest-b@test.invalid", "evaluate_itest_google_b")

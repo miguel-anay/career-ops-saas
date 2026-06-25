@@ -1,7 +1,15 @@
 import PgBoss from 'pg-boss'
 import 'dotenv/config'
 
-const boss = new PgBoss(process.env.DATABASE_URL)
+// The worker runs as the restricted RLS role (app_user), which has no CREATE
+// on the database. The pgboss schema is provisioned out-of-band by the admin
+// (worker/scripts/install-pgboss.mjs + db/pgboss_grants.sql), so we disable
+// self-migration here: start() only verifies the schema, it does not run DDL.
+const boss = new PgBoss({
+  connectionString: process.env.DATABASE_URL,
+  schema: 'pgboss',
+  migrate: false,
+})
 
 let started = false
 
