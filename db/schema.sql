@@ -39,6 +39,20 @@ CREATE TABLE users (
   created_at   timestamptz NOT NULL DEFAULT now()
 );
 
+-- companies_catalog: global, install-wide reference list of known companies.
+-- This is REFERENCE data, not tenant data: no user_id, no RLS. Users pick
+-- from it to populate their own watched_companies (per-tenant, RLS-protected).
+-- Stored once for the whole installation — not duplicated per user.
+CREATE TABLE companies_catalog (
+  id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  name        text        NOT NULL,
+  careers_url text        NOT NULL UNIQUE,
+  provider_id text        NOT NULL,
+  ats_api_url text,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_companies_catalog_name ON companies_catalog(name);
+
 -- watched_companies
 CREATE TABLE watched_companies (
   id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -48,9 +62,16 @@ CREATE TABLE watched_companies (
   provider_id text,
   ats_api_url text,
   enabled     boolean     NOT NULL DEFAULT true,
+  -- Link to the global catalog (NULL for manual/custom companies). The catalog
+  -- is the single source of truth for careers_url/provider when set.
+  company_id  uuid        REFERENCES companies_catalog(id) ON DELETE SET NULL,
   created_at  timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_watched_companies_user ON watched_companies(user_id);
+CREATE UNIQUE INDEX idx_watched_companies_user_company
+  ON watched_companies(user_id, company_id)
+  WHERE company_id IS NOT NULL;
+CREATE INDEX idx_watched_companies_company ON watched_companies(company_id);
 
 -- jobs
 CREATE TABLE jobs (

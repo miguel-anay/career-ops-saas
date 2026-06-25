@@ -40,6 +40,22 @@ func (m *MockService) Add(ctx context.Context, userID uuid.UUID, name, careersUR
 	return args.Get(0).(*db.WatchedCompany), args.Error(1)
 }
 
+func (m *MockService) AddFromCatalog(ctx context.Context, userID uuid.UUID, catalogID uuid.UUID) (*db.WatchedCompany, error) {
+	args := m.Called(ctx, userID, catalogID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*db.WatchedCompany), args.Error(1)
+}
+
+func (m *MockService) ListCatalog(ctx context.Context) ([]db.CompaniesCatalog, error) {
+	args := m.Called(ctx)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]db.CompaniesCatalog), args.Error(1)
+}
+
 func (m *MockService) Remove(ctx context.Context, userID uuid.UUID, companyID uuid.UUID) error {
 	args := m.Called(ctx, userID, companyID)
 	return args.Error(0)

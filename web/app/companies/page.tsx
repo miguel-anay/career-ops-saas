@@ -7,13 +7,6 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -39,30 +32,33 @@ interface Company {
   enabled: boolean
 }
 
+interface CatalogCompany {
+  id: string
+  name: string
+  careers_url: string
+  provider_id: string
+  ats_api_url: string
+}
+
 interface CompaniesResponse {
   companies: Company[]
 }
 
-const PROVIDERS = [
-  { value: 'greenhouse', label: 'Greenhouse' },
-  { value: 'ashby', label: 'Ashby' },
-  { value: 'lever', label: 'Lever' },
-  { value: 'recruitee', label: 'Recruitee' },
-  { value: 'smartrecruiters', label: 'SmartRecruiters' },
-  { value: 'workable', label: 'Workable' },
-]
+interface CatalogResponse {
+  catalog: CatalogCompany[]
+}
 
 export default function CompaniesPage() {
   const router = useRouter()
   const [companies, setCompanies] = useState<Company[]>([])
+  const [catalog, setCatalog] = useState<CatalogCompany[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [deleteTarget, setDeleteTarget] = useState<Company | null>(null)
 
-  // Add form state
-  const [newName, setNewName] = useState('')
-  const [newCareersUrl, setNewCareersUrl] = useState('')
-  const [newProviderId, setNewProviderId] = useState('')
-  const [isAdding, setIsAdding] = useState(false)
+  // Add-from-catalog state
+  const [query, setQuery] = useState('')
+  const [showResults, setShowResults] = useState(false)
+  const [addingId, setAddingId] = useState<string | null>(null)
 
   const loadCompanies = useCallback(async () => {
     setIsLoading(true)
@@ -76,33 +72,43 @@ export default function CompaniesPage() {
     }
   }, [])
 
+  const loadCatalog = useCallback(async () => {
+    try {
+      const data = await apiGet<CatalogResponse>('/api/companies/catalog')
+      setCatalog(data.catalog ?? [])
+    } catch {
+      toast.error('Failed to load company catalog')
+    }
+  }, [])
+
   useEffect(() => {
     if (!isAuthenticated()) {
       router.replace('/login')
       return
     }
     loadCompanies()
-  }, [loadCompanies, router])
+    loadCatalog()
+  }, [loadCompanies, loadCatalog, router])
 
-  const handleAddCompany = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!newName.trim() || !newCareersUrl.trim() || !newProviderId) return
-    setIsAdding(true)
+  // Catalog entries the user is not already watching, filtered by the search box.
+  const watchedUrls = new Set(companies.map(c => c.careers_url))
+  const availableCatalog = catalog.filter(c => !watchedUrls.has(c.careers_url))
+  const filteredCatalog = query.trim()
+    ? availableCatalog.filter(c => c.name.toLowerCase().includes(query.trim().toLowerCase()))
+    : availableCatalog
+
+  const handleAddFromCatalog = async (entry: CatalogCompany) => {
+    setAddingId(entry.id)
     try {
-      await apiPost('/api/companies', {
-        name: newName.trim(),
-        careers_url: newCareersUrl.trim(),
-        provider_id: newProviderId,
-      })
-      setNewName('')
-      setNewCareersUrl('')
-      setNewProviderId('')
-      toast.success(`${newName} added`)
+      await apiPost('/api/companies', { catalog_id: entry.id })
+      toast.success(`${entry.name} added`)
+      setQuery('')
+      setShowResults(false)
       loadCompanies()
     } catch {
-      toast.error('Failed to add company')
+      toast.error(`Failed to add ${entry.name}`)
     } finally {
-      setIsAdding(false)
+      setAddingId(null)
     }
   }
 
@@ -127,38 +133,43 @@ export default function CompaniesPage() {
         </Link>
       </div>
 
-      {/* Add Company form */}
-      <form onSubmit={handleAddCompany} className="flex gap-2 flex-wrap">
+      {/* Add company from the global catalog */}
+      <div className="relative max-w-xl">
         <Input
-          placeholder="Company name"
-          value={newName}
-          onChange={e => setNewName(e.target.value)}
-          className="w-48"
+          placeholder="Search companies to watch…"
+          value={query}
+          onChange={e => { setQuery(e.target.value); setShowResults(true) }}
+          onFocus={() => setShowResults(true)}
+          onBlur={() => setTimeout(() => setShowResults(false), 150)}
         />
-        <Input
-          type="url"
-          placeholder="Careers URL"
-          value={newCareersUrl}
-          onChange={e => setNewCareersUrl(e.target.value)}
-          className="flex-1 min-w-[200px]"
-        />
-        <Select value={newProviderId} onValueChange={(v) => setNewProviderId(v ?? '')}>
-          <SelectTrigger className="w-48">
-            <SelectValue placeholder="Provider" />
-          </SelectTrigger>
-          <SelectContent>
-            {PROVIDERS.map(p => (
-              <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Button
-          type="submit"
-          disabled={isAdding || !newName.trim() || !newCareersUrl.trim() || !newProviderId}
-        >
-          {isAdding ? 'Adding…' : 'Add Company'}
-        </Button>
-      </form>
+        {showResults && (
+          <div className="absolute z-10 mt-1 w-full max-h-80 overflow-y-auto rounded-md border bg-white shadow-md">
+            {filteredCatalog.length === 0 ? (
+              <div className="px-3 py-4 text-sm text-muted-foreground text-center">
+                {availableCatalog.length === 0
+                  ? 'All catalog companies are already watched.'
+                  : 'No matching companies.'}
+              </div>
+            ) : (
+              filteredCatalog.map(entry => (
+                <button
+                  key={entry.id}
+                  type="button"
+                  disabled={addingId === entry.id}
+                  onMouseDown={e => e.preventDefault()}
+                  onClick={() => handleAddFromCatalog(entry)}
+                  className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-gray-50 disabled:opacity-50"
+                >
+                  <span className="font-medium">{entry.name}</span>
+                  <span className="text-xs text-muted-foreground capitalize">
+                    {addingId === entry.id ? 'Adding…' : entry.provider_id}
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Companies table */}
       <div className="rounded-md border">

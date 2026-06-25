@@ -50,12 +50,20 @@ export async function handleScanCompany(job) {
   const client = await pool.connect()
 
   try {
-    // Fetch company details
+    // Fetch company details. For catalog-linked companies (company_id set) the
+    // careers_url / provider / ATS API URL are read from companies_catalog via
+    // COALESCE, so they stay fresh if the catalog entry is updated (no drift
+    // against the inline snapshot copied at watch time). Manual companies
+    // (company_id NULL) fall back to their own inline columns.
     const companyResult = await tenantQuery(
       user_id,
-      `SELECT id, name, careers_url, provider_id, ats_api_url
-       FROM watched_companies
-       WHERE id = $1::uuid AND user_id = $2::uuid AND enabled = true
+      `SELECT wc.id, wc.name,
+              COALESCE(cc.careers_url, wc.careers_url) AS careers_url,
+              COALESCE(cc.provider_id, wc.provider_id) AS provider_id,
+              COALESCE(cc.ats_api_url, wc.ats_api_url) AS ats_api_url
+       FROM watched_companies wc
+       LEFT JOIN companies_catalog cc ON cc.id = wc.company_id
+       WHERE wc.id = $1::uuid AND wc.user_id = $2::uuid AND wc.enabled = true
        LIMIT 1`,
       [company_id, user_id]
     )
