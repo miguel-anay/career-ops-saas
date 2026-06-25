@@ -17,7 +17,7 @@ vi.mock('next/navigation', () => ({
   redirect: vi.fn(),
 }))
 
-vi.mock('../../lib/api', () => ({
+vi.mock('../../features/cv/api', () => ({
   postIngest: mockPostIngest,
   getIngestion: mockGetIngestion,
 }))
@@ -27,7 +27,7 @@ vi.mock('../../lib/auth', () => ({
   getAccessToken: () => 'test-token',
 }))
 
-vi.mock('../../hooks/useJobProgress', () => ({
+vi.mock('../../features/cv/hooks', () => ({
   useJobProgress: mockUseJobProgress,
 }))
 

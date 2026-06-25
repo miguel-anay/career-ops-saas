@@ -62,7 +62,7 @@ afterEach(() => {
 
 describe('useScanProgress', () => {
   it('connects with correct URL including token when connect() is called', async () => {
-    const { useScanProgress } = await import('../../hooks/useScanProgress')
+    const { useScanProgress } = await import('../../../features/jobs/hooks')
     const { result } = renderHook(() => useScanProgress())
 
     act(() => {
@@ -74,7 +74,7 @@ describe('useScanProgress', () => {
   })
 
   it('parses incoming JSON events correctly', async () => {
-    const { useScanProgress } = await import('../../hooks/useScanProgress')
+    const { useScanProgress } = await import('../../../features/jobs/hooks')
     const { result } = renderHook(() => useScanProgress())
 
     await act(async () => {
@@ -90,7 +90,7 @@ describe('useScanProgress', () => {
   })
 
   it('status updates on scan.completed event', async () => {
-    const { useScanProgress } = await import('../../hooks/useScanProgress')
+    const { useScanProgress } = await import('../../../features/jobs/hooks')
     const { result } = renderHook(() => useScanProgress())
 
     await act(async () => {
@@ -104,7 +104,7 @@ describe('useScanProgress', () => {
   })
 
   it('cleanup closes WebSocket on unmount', async () => {
-    const { useScanProgress } = await import('../../hooks/useScanProgress')
+    const { useScanProgress } = await import('../../../features/jobs/hooks')
     const { result, unmount } = renderHook(() => useScanProgress())
 
     await act(async () => {

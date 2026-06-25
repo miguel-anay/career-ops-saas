@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 
-// Mock WebSocket (mirrors __tests__/hooks/useScanProgress.test.ts)
+// Mock WebSocket (mirrors __tests__/features/jobs/hooks.test.ts)
 class MockWebSocket {
   static instances: MockWebSocket[] = []
   url: string
@@ -64,7 +64,7 @@ const RUN_ID = '11111111-1111-1111-1111-111111111111'
 
 describe('useJobProgress', () => {
   it('connect(runId) transitions idle -> connecting -> working and includes scan_run_id + token in the URL', async () => {
-    const { useJobProgress } = await import('../../hooks/useJobProgress')
+    const { useJobProgress } = await import('../../../features/cv/hooks')
     const { result } = renderHook(() => useJobProgress())
 
     expect(result.current.status).toBe('idle')
@@ -86,7 +86,7 @@ describe('useJobProgress', () => {
   })
 
   it('transitions to completed and surfaces payload on ingest.completed', async () => {
-    const { useJobProgress } = await import('../../hooks/useJobProgress')
+    const { useJobProgress } = await import('../../../features/cv/hooks')
     const { result } = renderHook(() => useJobProgress())
 
     await act(async () => {
@@ -108,7 +108,7 @@ describe('useJobProgress', () => {
   })
 
   it('transitions to error and surfaces diagnostic payload on ingest.failed', async () => {
-    const { useJobProgress } = await import('../../hooks/useJobProgress')
+    const { useJobProgress } = await import('../../../features/cv/hooks')
     const { result } = renderHook(() => useJobProgress())
 
     await act(async () => {
@@ -130,7 +130,7 @@ describe('useJobProgress', () => {
   })
 
   it('reconnects once after an unexpected close while still working', async () => {
-    const { useJobProgress } = await import('../../hooks/useJobProgress')
+    const { useJobProgress } = await import('../../../features/cv/hooks')
     const { result } = renderHook(() => useJobProgress())
 
     await act(async () => {
@@ -158,7 +158,7 @@ describe('useJobProgress', () => {
   })
 
   it('does not cross-deliver events between two different run_ids', async () => {
-    const { useJobProgress } = await import('../../hooks/useJobProgress')
+    const { useJobProgress } = await import('../../../features/cv/hooks')
     const { result: resultX } = renderHook(() => useJobProgress())
     const { result: resultY } = renderHook(() => useJobProgress())
 
@@ -190,7 +190,7 @@ describe('useJobProgress', () => {
   })
 
   it('reset() returns the hook to idle and clears payload', async () => {
-    const { useJobProgress } = await import('../../hooks/useJobProgress')
+    const { useJobProgress } = await import('../../../features/cv/hooks')
     const { result } = renderHook(() => useJobProgress())
 
     await act(async () => {
@@ -211,7 +211,7 @@ describe('useJobProgress', () => {
   })
 
   it('cleanup closes the WebSocket on unmount', async () => {
-    const { useJobProgress } = await import('../../hooks/useJobProgress')
+    const { useJobProgress } = await import('../../../features/cv/hooks')
     const { result, unmount } = renderHook(() => useJobProgress())
 
     await act(async () => {

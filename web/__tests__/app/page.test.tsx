@@ -25,7 +25,7 @@ vi.mock('../../lib/auth', () => ({
   getAccessToken: () => 'test-token',
 }))
 
-vi.mock('../../hooks/useScanProgress', () => ({
+vi.mock('../../features/jobs/hooks', () => ({
   useScanProgress: () => ({
     events: [],
     status: 'idle',

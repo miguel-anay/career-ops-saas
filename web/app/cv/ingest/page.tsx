@@ -5,9 +5,9 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { postIngest, getIngestion, type IngestionStatus } from '@/lib/api'
+import { postIngest, getIngestion, type IngestionStatus } from '@/features/cv/api'
 import { isAuthenticated } from '@/lib/auth'
-import { useJobProgress } from '@/hooks/useJobProgress'
+import { useJobProgress } from '@/features/cv/hooks'
 
 const POLL_INTERVAL_MS = 4000
 
