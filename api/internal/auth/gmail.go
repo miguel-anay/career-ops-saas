@@ -158,16 +158,37 @@ func bearerUserID(r *http.Request, jwtSecret string) (uuid.UUID, bool) {
 	return userID, true
 }
 
+// gmailStateTyp is a dedicated claim value that makes the gmail-state JWT
+// non-interchangeable with access/refresh tokens. Both share the same
+// JWTSecret and both carry a Subject/UserID, so a bare jwt.RegisteredClaims
+// state token would accept ANY valid access or refresh token as state — an
+// attacker holding a victim's leaked access token could pass it as state and
+// attach their own Gmail refresh token to the victim's account. Requiring
+// this claim (present here, absent from Claims in jwt.go) closes that hole:
+// verifyGmailState rejects any token that doesn't carry it.
+const gmailStateTyp = "gmail_state"
+
+// gmailStateClaims is the claims shape for signGmailState/verifyGmailState —
+// deliberately distinct from auth.Claims (access/refresh tokens) so the two
+// token families can never be swapped for one another.
+type gmailStateClaims struct {
+	Typ string `json:"typ"`
+	jwt.RegisteredClaims
+}
+
 // signGmailState signs a short-lived, single-purpose JWT carrying userID as
-// its subject. It reuses the app's JWT secret (no new secret/env var) but is
-// a distinct claims shape/TTL from access/refresh tokens — it is only ever
-// verified by verifyGmailState, never accepted by the Authenticator
-// middleware (different claims struct).
+// its subject and the gmail_state typ claim. It reuses the app's JWT secret
+// (no new secret/env var) but is a distinct claims shape/TTL from
+// access/refresh tokens — it is only ever verified by verifyGmailState,
+// never accepted by the Authenticator middleware (different claims struct).
 func signGmailState(userID, secret string) (string, error) {
-	claims := jwt.RegisteredClaims{
-		Subject:   userID,
-		ExpiresAt: jwt.NewNumericDate(time.Now().Add(gmailStateTTL)),
-		IssuedAt:  jwt.NewNumericDate(time.Now()),
+	claims := gmailStateClaims{
+		Typ: gmailStateTyp,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   userID,
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(gmailStateTTL)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signed, err := token.SignedString([]byte(secret))
@@ -178,9 +199,11 @@ func signGmailState(userID, secret string) (string, error) {
 }
 
 // verifyGmailState validates a state token produced by signGmailState and
-// returns the userID it carries.
+// returns the userID it carries. Rejects any token missing the gmail_state
+// typ claim — including otherwise-valid access/refresh tokens signed with
+// the same secret (see gmailStateTyp doc comment).
 func verifyGmailState(state, secret string) (uuid.UUID, error) {
-	token, err := jwt.ParseWithClaims(state, &jwt.RegisteredClaims{}, func(t *jwt.Token) (interface{}, error) {
+	token, err := jwt.ParseWithClaims(state, &gmailStateClaims{}, func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
 		}
@@ -189,9 +212,12 @@ func verifyGmailState(state, secret string) (uuid.UUID, error) {
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("parse gmail state: %w", err)
 	}
-	claims, ok := token.Claims.(*jwt.RegisteredClaims)
+	claims, ok := token.Claims.(*gmailStateClaims)
 	if !ok || !token.Valid {
 		return uuid.Nil, fmt.Errorf("invalid gmail state claims")
+	}
+	if claims.Typ != gmailStateTyp {
+		return uuid.Nil, fmt.Errorf("wrong token type for gmail state")
 	}
 	return uuid.Parse(claims.Subject)
 }

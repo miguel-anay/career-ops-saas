@@ -201,3 +201,59 @@ func TestVerifyGmailState_RejectsTamperedToken(t *testing.T) {
 	_, err = verifyGmailState(unsignedStr, gmailTestJWTSecret)
 	assert.Error(t, err)
 }
+
+// TestVerifyGmailState_RejectsForeignTokenTypes is the regression test for
+// the ingestion-source-hijack finding: verifyGmailState must NOT accept a
+// token minted for a different purpose (access/refresh) even though it is
+// validly signed with the same JWTSecret and carries a Subject. Without a
+// dedicated "typ" claim, an attacker holding a victim's leaked access token
+// could pass it as state and attach their own Gmail refresh token to the
+// victim's account (no victim interaction required).
+func TestVerifyGmailState_RejectsForeignTokenTypes(t *testing.T) {
+	userID := uuid.New()
+
+	accessToken, err := IssueAccessToken(userID.String(), "free", gmailTestJWTSecret)
+	require.NoError(t, err)
+	_, err = verifyGmailState(accessToken, gmailTestJWTSecret)
+	assert.Error(t, err, "an IssueAccessToken() output must be REJECTED as gmail state")
+
+	refreshToken, err := IssueRefreshToken(userID.String(), gmailTestJWTSecret)
+	require.NoError(t, err)
+	_, err = verifyGmailState(refreshToken, gmailTestJWTSecret)
+	assert.Error(t, err, "an IssueRefreshToken() output must be REJECTED as gmail state")
+
+	// happy path: a properly minted gmail state must still pass.
+	state, err := signGmailState(userID.String(), gmailTestJWTSecret)
+	require.NoError(t, err)
+	gotUserID, err := verifyGmailState(state, gmailTestJWTSecret)
+	require.NoError(t, err)
+	assert.Equal(t, userID, gotUserID)
+}
+
+// TestHandleGmailOAuthCallback_RejectsAttackerSuppliedAccessTokenAsState is
+// the end-to-end regression for the same finding at the HTTP handler layer:
+// an attacker who sets state= to a leaked victim access token (with a
+// matching gmail_oauth_state cookie of their own making) must be rejected
+// before PersistGmailRefreshToken is ever reached.
+func TestHandleGmailOAuthCallback_RejectsAttackerSuppliedAccessTokenAsState(t *testing.T) {
+	h := NewHandler(newTestConfig(), nil)
+	victimUserID := uuid.New()
+
+	leakedAccessToken, err := IssueAccessToken(victimUserID.String(), "free", gmailTestJWTSecret)
+	require.NoError(t, err)
+
+	persistCalled := false
+	h.persistGmailToken = func(ctx context.Context, uid uuid.UUID, refreshToken string) error {
+		persistCalled = true
+		return nil
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/google/gmail/callback?state="+leakedAccessToken+"&code=authcode", nil)
+	req.AddCookie(&http.Cookie{Name: "gmail_oauth_state", Value: leakedAccessToken})
+	rec := httptest.NewRecorder()
+
+	h.HandleGmailOAuthCallback(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.False(t, persistCalled, "PersistGmailRefreshToken must never be called for a foreign-typed state token")
+}
