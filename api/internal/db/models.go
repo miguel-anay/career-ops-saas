@@ -232,6 +232,16 @@ type CvIngestion struct {
 	FinishedAt sql.NullTime `json:"finished_at"`
 }
 
+type EmailIngestRun struct {
+	ID         uuid.UUID       `json:"id"`
+	UserID     uuid.UUID       `json:"user_id"`
+	Status     string          `json:"status"`
+	NewJobs    int32           `json:"new_jobs"`
+	ErrorsJson json.RawMessage `json:"errors_json"`
+	StartedAt  time.Time       `json:"started_at"`
+	FinishedAt sql.NullTime    `json:"finished_at"`
+}
+
 type Job struct {
 	ID             uuid.UUID             `json:"id"`
 	UserID         uuid.UUID             `json:"user_id"`
@@ -275,13 +285,14 @@ type Usage struct {
 }
 
 type User struct {
-	ID          uuid.UUID       `json:"id"`
-	Email       string          `json:"email"`
-	GoogleID    string          `json:"google_id"`
-	Plan        PlanT           `json:"plan"`
-	CvMarkdown  sql.NullString  `json:"cv_markdown"`
-	ProfileJson json.RawMessage `json:"profile_json"`
-	CreatedAt   time.Time       `json:"created_at"`
+	ID                 uuid.UUID       `json:"id"`
+	Email              string          `json:"email"`
+	GoogleID           string          `json:"google_id"`
+	Plan               PlanT           `json:"plan"`
+	CvMarkdown         sql.NullString  `json:"cv_markdown"`
+	ProfileJson        json.RawMessage `json:"profile_json"`
+	CreatedAt          time.Time       `json:"created_at"`
+	GoogleRefreshToken sql.NullString  `json:"google_refresh_token"`
 }
 
 type WatchedCompany struct {

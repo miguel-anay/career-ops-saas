@@ -30,13 +30,16 @@ CREATE TYPE scan_status_t AS ENUM ('running', 'completed', 'partial', 'failed');
 
 -- users
 CREATE TABLE users (
-  id           uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-  email        text        NOT NULL UNIQUE,
-  google_id    text        NOT NULL UNIQUE,
-  plan         plan_t      NOT NULL DEFAULT 'free',
-  cv_markdown  text,
-  profile_json jsonb       NOT NULL DEFAULT '{}'::jsonb,
-  created_at   timestamptz NOT NULL DEFAULT now()
+  id                  uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  email               text        NOT NULL UNIQUE,
+  google_id           text        NOT NULL UNIQUE,
+  plan                plan_t      NOT NULL DEFAULT 'free',
+  cv_markdown         text,
+  profile_json        jsonb       NOT NULL DEFAULT '{}'::jsonb,
+  created_at          timestamptz NOT NULL DEFAULT now(),
+  -- Gmail incremental-consent refresh token (gmail-job-ingestion). Nullable:
+  -- existing users have none until they connect Gmail.
+  google_refresh_token text
 );
 
 -- companies_catalog: global, install-wide reference list of known companies.
@@ -162,3 +165,18 @@ CREATE TABLE cv_ingestions (
   finished_at timestamptz
 );
 CREATE INDEX idx_cv_ingestions_user ON cv_ingestions(user_id, started_at DESC);
+
+-- email_ingest_runs (gmail-job-ingestion): mirrors scan_runs minus
+-- company_id-specific fields. Status vocabulary: running -> completed /
+-- partial (some per-email errors) / error (no token / total failure).
+CREATE TABLE email_ingest_runs (
+  id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     uuid        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  status      text        NOT NULL DEFAULT 'running'
+                            CHECK (status IN ('running','completed','partial','error')),
+  new_jobs    integer     NOT NULL DEFAULT 0,
+  errors_json jsonb       NOT NULL DEFAULT '[]'::jsonb,
+  started_at  timestamptz NOT NULL DEFAULT now(),
+  finished_at timestamptz
+);
+CREATE INDEX idx_email_ingest_runs_user ON email_ingest_runs(user_id, started_at DESC);
