@@ -14,7 +14,7 @@ import (
 )
 
 const getUserByGoogleID = `-- name: GetUserByGoogleID :one
-SELECT id, email, google_id, plan, cv_markdown, profile_json, created_at FROM users
+SELECT id, email, google_id, plan, cv_markdown, profile_json, created_at, google_refresh_token FROM users
 WHERE google_id = $1
 LIMIT 1
 `
@@ -30,12 +30,13 @@ func (q *Queries) GetUserByGoogleID(ctx context.Context, googleID string) (User,
 		&i.CvMarkdown,
 		&i.ProfileJson,
 		&i.CreatedAt,
+		&i.GoogleRefreshToken,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, google_id, plan, cv_markdown, profile_json, created_at FROM users
+SELECT id, email, google_id, plan, cv_markdown, profile_json, created_at, google_refresh_token FROM users
 WHERE id = $1
 LIMIT 1
 `
@@ -51,6 +52,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.CvMarkdown,
 		&i.ProfileJson,
 		&i.CreatedAt,
+		&i.GoogleRefreshToken,
 	)
 	return i, err
 }
@@ -59,7 +61,7 @@ const updateUserCVMarkdown = `-- name: UpdateUserCVMarkdown :one
 UPDATE users
 SET cv_markdown = $2
 WHERE id = $1
-RETURNING id, email, google_id, plan, cv_markdown, profile_json, created_at
+RETURNING id, email, google_id, plan, cv_markdown, profile_json, created_at, google_refresh_token
 `
 
 type UpdateUserCVMarkdownParams struct {
@@ -78,6 +80,35 @@ func (q *Queries) UpdateUserCVMarkdown(ctx context.Context, arg UpdateUserCVMark
 		&i.CvMarkdown,
 		&i.ProfileJson,
 		&i.CreatedAt,
+		&i.GoogleRefreshToken,
+	)
+	return i, err
+}
+
+const updateUserGoogleRefreshToken = `-- name: UpdateUserGoogleRefreshToken :one
+UPDATE users
+SET google_refresh_token = $2
+WHERE id = $1
+RETURNING id, email, google_id, plan, cv_markdown, profile_json, created_at, google_refresh_token
+`
+
+type UpdateUserGoogleRefreshTokenParams struct {
+	ID                 uuid.UUID      `json:"id"`
+	GoogleRefreshToken sql.NullString `json:"google_refresh_token"`
+}
+
+func (q *Queries) UpdateUserGoogleRefreshToken(ctx context.Context, arg UpdateUserGoogleRefreshTokenParams) (User, error) {
+	row := q.db.QueryRowContext(ctx, updateUserGoogleRefreshToken, arg.ID, arg.GoogleRefreshToken)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.GoogleID,
+		&i.Plan,
+		&i.CvMarkdown,
+		&i.ProfileJson,
+		&i.CreatedAt,
+		&i.GoogleRefreshToken,
 	)
 	return i, err
 }
@@ -86,7 +117,7 @@ const updateUserPlan = `-- name: UpdateUserPlan :one
 UPDATE users
 SET plan = $2
 WHERE id = $1
-RETURNING id, email, google_id, plan, cv_markdown, profile_json, created_at
+RETURNING id, email, google_id, plan, cv_markdown, profile_json, created_at, google_refresh_token
 `
 
 type UpdateUserPlanParams struct {
@@ -105,6 +136,7 @@ func (q *Queries) UpdateUserPlan(ctx context.Context, arg UpdateUserPlanParams) 
 		&i.CvMarkdown,
 		&i.ProfileJson,
 		&i.CreatedAt,
+		&i.GoogleRefreshToken,
 	)
 	return i, err
 }
@@ -113,7 +145,7 @@ const updateUserProfileJSON = `-- name: UpdateUserProfileJSON :one
 UPDATE users
 SET profile_json = $2
 WHERE id = $1
-RETURNING id, email, google_id, plan, cv_markdown, profile_json, created_at
+RETURNING id, email, google_id, plan, cv_markdown, profile_json, created_at, google_refresh_token
 `
 
 type UpdateUserProfileJSONParams struct {
@@ -132,6 +164,7 @@ func (q *Queries) UpdateUserProfileJSON(ctx context.Context, arg UpdateUserProfi
 		&i.CvMarkdown,
 		&i.ProfileJson,
 		&i.CreatedAt,
+		&i.GoogleRefreshToken,
 	)
 	return i, err
 }
