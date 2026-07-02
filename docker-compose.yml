@@ -45,6 +45,8 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://app_user:app_pw@postgres:5432/careerops?sslmode=disable
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       ANTHROPIC_MODEL: claude-sonnet-4-6
       # Evaluator provider: anthropic (default) | qwen | deepseek | minimax | openai

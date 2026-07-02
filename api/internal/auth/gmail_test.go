@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -41,7 +42,14 @@ func newTestConfig() *config.Config {
 
 // ---- HandleGmailOAuth (GET /auth/google/gmail) ----
 
-func TestHandleGmailOAuth_RedirectIncludesScopeAndConsentParams(t *testing.T) {
+// HandleGmailOAuth responds with JSON {"auth_url": "..."} rather than a 302
+// redirect: it is called by the SPA through the authenticated apiGet client
+// (web/lib/api.ts), which attaches the Bearer token from localStorage. A
+// plain browser navigation (window.location.href = <this endpoint>) sends no
+// Authorization header at all, so a redirect response would 401 on every
+// click. The web client reads auth_url from the JSON body and THEN does the
+// browser navigation to Google directly.
+func TestHandleGmailOAuth_ReturnsAuthURLJSONWithScopeAndConsentParams(t *testing.T) {
 	cfg := newTestConfig()
 	h := NewHandler(cfg, nil)
 	userID := uuid.New()
@@ -54,17 +62,22 @@ func TestHandleGmailOAuth_RedirectIncludesScopeAndConsentParams(t *testing.T) {
 
 	h.HandleGmailOAuth(rec, req)
 
-	require.Equal(t, http.StatusTemporaryRedirect, rec.Code)
+	require.Equal(t, http.StatusOK, rec.Code, "must respond 200 JSON, not a redirect — a plain browser nav carries no Bearer header")
+	assert.Empty(t, rec.Header().Get("Location"), "must not set a redirect Location header")
 
-	loc := rec.Header().Get("Location")
-	require.NotEmpty(t, loc)
-	parsed, err := url.Parse(loc)
+	var body struct {
+		AuthURL string `json:"auth_url"`
+	}
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&body))
+	require.NotEmpty(t, body.AuthURL)
+
+	parsed, err := url.Parse(body.AuthURL)
 	require.NoError(t, err)
 
 	q := parsed.Query()
-	assert.Contains(t, q.Get("scope"), "gmail.readonly", "redirect URL scope must include gmail.readonly")
-	assert.Equal(t, "consent", q.Get("prompt"), "redirect URL must force prompt=consent so an already-linked account still issues a refresh_token")
-	assert.Equal(t, "offline", q.Get("access_type"), "redirect URL must request access_type=offline")
+	assert.Contains(t, q.Get("scope"), "gmail.readonly", "auth_url scope must include gmail.readonly")
+	assert.Equal(t, "consent", q.Get("prompt"), "auth_url must force prompt=consent so an already-linked account still issues a refresh_token")
+	assert.Equal(t, "offline", q.Get("access_type"), "auth_url must request access_type=offline")
 	assert.NotEmpty(t, q.Get("state"))
 }
 

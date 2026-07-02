@@ -57,8 +57,14 @@ func gmailRedirectURL(base string) string {
 	return strings.TrimSuffix(base, "/") + "/gmail/callback"
 }
 
-// HandleGmailOAuth redirects an authenticated user to Google's incremental
-// consent screen for gmail.readonly. GET /auth/google/gmail.
+// HandleGmailOAuth returns the Google incremental-consent URL for
+// gmail.readonly as JSON, `{"auth_url": "..."}`. GET /auth/google/gmail.
+//
+// This is Bearer-authenticated (see bearerUserID below), so it must be
+// called through an authenticated client — web/lib/api.ts's apiGet — rather
+// than a plain top-level browser navigation, which carries no Authorization
+// header and would always 401. The caller reads auth_url from the response
+// and THEN does the actual browser navigation to Google.
 //
 // Authentication is checked in-package via VerifyToken (Bearer header)
 // rather than middleware.Authenticator: the middleware package imports auth
@@ -90,7 +96,7 @@ func (h *Handler) HandleGmailOAuth(w http.ResponseWriter, r *http.Request) {
 		oauth2.AccessTypeOffline,
 		oauth2.SetAuthURLParam("prompt", "consent"),
 	)
-	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
+	writeJSON(w, http.StatusOK, map[string]string{"auth_url": url})
 }
 
 // HandleGmailOAuthCallback validates state, exchanges the code, persists the
