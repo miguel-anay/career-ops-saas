@@ -50,6 +50,42 @@ func TestTriggerIngest_Integration(t *testing.T) {
 		jobCount := countPgbossJobs(ctx, t, h, "ingest-email")
 		require.GreaterOrEqual(t, jobCount, 1, "TriggerIngest must enqueue an ingest-email job")
 	})
+
+	// TestTriggerIngest_Integration/enqueue fails after run insert proves the
+	// review finding fix: an enqueue failure AFTER the email_ingest_runs row
+	// is committed must not leave that row orphaned in status "running"
+	// forever (no worker job will ever exist to finalize it). The queue is
+	// temporarily unregistered (DELETE FROM pgboss.queue) so queue.Enqueue's
+	// JOIN yields zero rows and fails deterministically — the same
+	// silent-failure trap proven in queue/boss_test.go — then re-registered
+	// via t.Cleanup so later subtests/tests are unaffected.
+	t.Run("enqueue fails after run insert: run is marked error, not left running", func(t *testing.T) {
+		userID := h.SeedUser(ctx, t, "emailingest-itest-enqueue-fail@test.invalid", "emailingest_itest_enqueue_fail")
+		mustSetGoogleRefreshToken(ctx, t, h, userID, "refresh-token-value")
+
+		// q_fkey is ON DELETE RESTRICT, which Postgres checks immediately
+		// regardless of DEFERRABLE — any existing job rows for this queue
+		// (e.g. from the "Gmail token present" subtest above) must be
+		// cleared first. pgboss.delete_queue is pg-boss's own admin function:
+		// it then removes the registry row AND drops the queue's job
+		// partition table together, so t.Cleanup's EnsurePgbossSchema can
+		// recreate a clean partition afterward. This leaves queue.Enqueue's
+		// JOIN against pgboss.queue matching zero rows — the same
+		// silent-failure trap proven in queue/boss_test.go.
+		_, err := h.AdminPool.Exec(ctx, `DELETE FROM pgboss.job WHERE name = $1`, "ingest-email")
+		require.NoError(t, err, "clear existing ingest-email job rows")
+		_, err = h.AdminPool.Exec(ctx, `SELECT pgboss.delete_queue($1)`, "ingest-email")
+		require.NoError(t, err, "temporarily unregister ingest-email queue")
+		t.Cleanup(func() { h.EnsurePgbossSchema(ctx, t, "ingest-email") })
+
+		runID, err := svc.TriggerIngest(ctx, userID)
+		require.Error(t, err, "TriggerIngest must surface the enqueue failure")
+		require.Equal(t, uuid.Nil, runID)
+
+		row := mustGetLatestEmailIngestRunForUser(ctx, t, h, userID)
+		require.Equal(t, "error", row.Status,
+			"run must be marked error on enqueue failure, not left running forever")
+	})
 }
 
 // TestGetIngestRun_Integration proves RLS isolation for reads: a
@@ -125,4 +161,15 @@ func countPgbossJobs(ctx context.Context, t *testing.T, h *rlsdb.Harness, name s
 	err := h.AdminPool.QueryRow(ctx, `SELECT count(*) FROM pgboss.job WHERE name = $1`, name).Scan(&count)
 	require.NoError(t, err)
 	return count
+}
+
+func mustGetLatestEmailIngestRunForUser(ctx context.Context, t *testing.T, h *rlsdb.Harness, userID uuid.UUID) emailIngestRunRow {
+	t.Helper()
+	var row emailIngestRunRow
+	err := h.AdminPool.QueryRow(ctx,
+		`SELECT id, user_id, status FROM email_ingest_runs WHERE user_id = $1 ORDER BY started_at DESC LIMIT 1`,
+		userID,
+	).Scan(&row.ID, &row.UserID, &row.Status)
+	require.NoError(t, err)
+	return row
 }

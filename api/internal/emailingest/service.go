@@ -74,16 +74,48 @@ func (s *Service) TriggerIngest(ctx context.Context, userID uuid.UUID) (uuid.UUI
 
 	payload, err := json.Marshal(ingestEmailPayload{UserID: userID, IngestRunID: run.ID})
 	if err != nil {
-		return uuid.Nil, fmt.Errorf("marshal ingest-email payload: %w", err)
+		return uuid.Nil, s.failRun(ctx, userID, run.ID, "enqueue_failed", fmt.Errorf("marshal ingest-email payload: %w", err))
 	}
 	if err := queue.Enqueue(ctx, s.pool, queue.Job{
 		Name: "ingest-email",
 		Data: json.RawMessage(payload),
 	}); err != nil {
-		return uuid.Nil, fmt.Errorf("enqueue ingest-email: %w", err)
+		return uuid.Nil, s.failRun(ctx, userID, run.ID, "enqueue_failed", fmt.Errorf("enqueue ingest-email: %w", err))
 	}
 
 	return run.ID, nil
+}
+
+// failRun marks a just-inserted email_ingest_run "error" (best-effort, in a
+// fresh tenant tx — the run's own insert tx already committed) and returns
+// origErr so the caller still surfaces the real failure to its caller. Without
+// this, a post-commit failure (enqueue, payload marshal) leaves the run
+// orphaned in status "running" forever, since no worker job exists to ever
+// finalize it.
+func (s *Service) failRun(ctx context.Context, userID, runID uuid.UUID, reason string, origErr error) error {
+	markErr := platform.WithTenantTx(ctx, s.pool, userID, func(q *db.Queries) error {
+		errPayload, err := json.Marshal([]string{reason})
+		if err != nil {
+			return fmt.Errorf("marshal error reason: %w", err)
+		}
+		if _, err := q.AppendEmailIngestRunError(ctx, db.AppendEmailIngestRunErrorParams{
+			ID:      runID,
+			Column2: errPayload,
+		}); err != nil {
+			return fmt.Errorf("append error reason: %w", err)
+		}
+		if _, err := q.UpdateEmailIngestRunStatus(ctx, db.UpdateEmailIngestRunStatusParams{
+			ID:     runID,
+			Status: "error",
+		}); err != nil {
+			return fmt.Errorf("update run status: %w", err)
+		}
+		return nil
+	})
+	if markErr != nil {
+		return fmt.Errorf("%w (also failed to mark run error: %v)", origErr, markErr)
+	}
+	return origErr
 }
 
 // GetIngestRun returns the email_ingest_run record by ID, scoped to the
