@@ -31,9 +31,12 @@ if (!url) {
   process.exit(1)
 }
 
-// The 4 queue names enqueued by the Go API and consumed by worker/index.mjs.
-// Keep in sync with worker/index.mjs's registerWorker() calls.
-export const QUEUE_NAMES = ['scan-company', 'evaluate-job', 'generate-pdf', 'ingest-cv']
+// The 5 queue names enqueued by the Go API and consumed by worker/index.mjs.
+// Keep in sync with worker/index.mjs's registerWorker() calls. Missing an
+// entry here = silent job loss: boss.createQueue must run (admin-side,
+// here) before the Go API's queue.Enqueue can route a job into that
+// queue's partition.
+export const QUEUE_NAMES = ['scan-company', 'evaluate-job', 'generate-pdf', 'ingest-cv', 'ingest-email']
 
 async function renameOrphanedFakeTable(connectionString) {
   const client = new pg.Client({ connectionString })
