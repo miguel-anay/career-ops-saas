@@ -48,4 +48,57 @@ describe('normalizeJobUrl', () => {
   it('returns null for an unparsable URL instead of throwing', () => {
     expect(normalizeJobUrl('linkedin', 'not-a-url')).toBeNull()
   })
+
+  describe('security: protocol + hostname validation (CRITICAL fix)', () => {
+    it('rejects non-http(s) protocols (ftp)', () => {
+      expect(normalizeJobUrl('computrabajo', 'ftp://malware.example/payload.exe')).toBeNull()
+    })
+
+    it('rejects javascript: URLs', () => {
+      expect(normalizeJobUrl('linkedin', 'javascript:alert(1)')).toBeNull()
+    })
+
+    it('rejects data: URLs', () => {
+      expect(normalizeJobUrl('bumeran', 'data:text/html,<script>alert(1)</script>')).toBeNull()
+    })
+
+    it('does NOT rewrite a linkedin-shaped path on a non-linkedin host to a fabricated linkedin canonical URL', () => {
+      const result = normalizeJobUrl('linkedin', 'https://tracking.evil-redirect.com/jobs/view/999888777')
+      expect(result).not.toBe('https://www.linkedin.com/jobs/view/999888777')
+      expect(result).toBeNull()
+    })
+
+    it('does NOT accept an indeed jk param from a non-indeed host', () => {
+      const result = normalizeJobUrl('indeed', 'https://evil-redirect.example.com/x?jk=abcdef123456')
+      expect(result).toBeNull()
+    })
+
+    it('rejects a computrabajo-claimed URL on an untrusted host', () => {
+      expect(normalizeJobUrl('computrabajo', 'https://phishing.example.com/empleos/oferta/x')).toBeNull()
+    })
+
+    it('rejects a bumeran-claimed URL on an untrusted host', () => {
+      expect(normalizeJobUrl('bumeran', 'https://phishing.example.com/empleos/x.html')).toBeNull()
+    })
+
+    it('still normalizes a legit linkedin subdomain (www.linkedin.com)', () => {
+      expect(normalizeJobUrl('linkedin', 'https://www.linkedin.com/jobs/view/42?trk=x'))
+        .toBe('https://www.linkedin.com/jobs/view/42')
+    })
+
+    it('still normalizes a legit indeed country subdomain (pe.indeed.com)', () => {
+      expect(normalizeJobUrl('indeed', 'https://pe.indeed.com/rc/clk?jk=abc123&utm_source=email'))
+        .toBe('https://www.indeed.com/viewjob?jk=abc123')
+    })
+
+    it('still normalizes a legit computrabajo country domain (computrabajo.com.pe)', () => {
+      expect(normalizeJobUrl('computrabajo', 'https://www.computrabajo.com.pe/empleos/oferta/x?utm_source=email'))
+        .toBe('https://www.computrabajo.com.pe/empleos/oferta/x')
+    })
+
+    it('still normalizes a legit bumeran country domain (bumeran.com.pe)', () => {
+      expect(normalizeJobUrl('bumeran', 'https://www.bumeran.com.pe/empleos/x.html?utm_source=email'))
+        .toBe('https://www.bumeran.com.pe/empleos/x.html')
+    })
+  })
 })
