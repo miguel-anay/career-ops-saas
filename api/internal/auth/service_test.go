@@ -42,3 +42,29 @@ func TestPersistGmailRefreshToken(t *testing.T) {
 		require.Equal(t, "refresh-token-v2", u.GoogleRefreshToken.String)
 	})
 }
+
+// TestUpsertUser proves the OAuth-callback upsert survives schema growth:
+// auth_upsert_user RETURNS users, so any migration that adds a column to
+// users changes the result arity. A `SELECT *` with a positional scan breaks
+// login for every user the moment such a migration lands (regression: 006
+// added google_refresh_token and the callback started returning 500).
+//
+// DB-gated: skips cleanly when TEST_DATABASE_URL is unset (see rlsdb.New).
+func TestUpsertUser(t *testing.T) {
+	ctx := context.Background()
+	h := rlsdb.New(ctx, t)
+
+	gu := &auth.GoogleUser{
+		ID:    "upsert-itest-google",
+		Email: "upsert-itest@test.invalid",
+		Name:  "Upsert Itest",
+	}
+
+	u, err := auth.UpsertUser(ctx, h.AppPool, gu)
+	require.NoError(t, err)
+	require.Equal(t, gu.Email, u.Email)
+
+	again, err := auth.UpsertUser(ctx, h.AppPool, gu)
+	require.NoError(t, err)
+	require.Equal(t, u.ID, again.ID)
+}
