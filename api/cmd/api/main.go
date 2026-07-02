@@ -75,6 +75,15 @@ func main() {
 		r.Get("/auth/google/callback", authHandler.GoogleCallback)
 		r.Post("/auth/refresh", authHandler.Refresh)
 		r.Post("/auth/logout", authHandler.Logout)
+		// gmail-job-ingestion: incremental consent (gmail.readonly). Both
+		// routes stay in the unauthenticated /auth group at the router level
+		// — HandleGmailOAuth verifies its own Bearer token in-package (see
+		// auth/gmail.go) instead of middleware.Authenticator, avoiding an
+		// auth<->middleware import cycle. HandleGmailOAuthCallback is
+		// state-validated exactly like GoogleCallback, never JWT-guarded
+		// (Google itself calls it with no Authorization header).
+		r.Get("/auth/google/gmail", authHandler.HandleGmailOAuth)
+		r.Get("/auth/google/gmail/callback", authHandler.HandleGmailOAuthCallback)
 	})
 
 	// 7. Mount /api routes with auth + tenant middleware.

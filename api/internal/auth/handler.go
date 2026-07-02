@@ -1,12 +1,14 @@
 package auth
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/miguel-anay/career-ops-saas/api/internal/config"
 	"golang.org/x/oauth2"
@@ -14,18 +16,35 @@ import (
 
 // Handler holds the dependencies for auth HTTP handlers.
 type Handler struct {
-	cfg      *config.Config
-	oauthCfg *oauth2.Config
-	pool     *pgxpool.Pool
+	cfg           *config.Config
+	oauthCfg      *oauth2.Config
+	pool          *pgxpool.Pool
+	gmailOAuthCfg *oauth2.Config
+
+	// exchangeGmailCode and persistGmailToken are seams over Gmail's real
+	// network exchange and the DB persist step (PersistGmailRefreshToken).
+	// NewHandler wires them to the real implementations; tests override
+	// them directly (package auth, same-package unexported fields) to avoid
+	// hitting real Google/Postgres in unit tests.
+	exchangeGmailCode func(ctx context.Context, code string) (*oauth2.Token, error)
+	persistGmailToken func(ctx context.Context, userID uuid.UUID, refreshToken string) error
 }
 
 // NewHandler creates a new auth Handler.
 func NewHandler(cfg *config.Config, pool *pgxpool.Pool) *Handler {
-	return &Handler{
-		cfg:      cfg,
-		oauthCfg: NewOAuthConfig(cfg),
-		pool:     pool,
+	h := &Handler{
+		cfg:           cfg,
+		oauthCfg:      NewOAuthConfig(cfg),
+		pool:          pool,
+		gmailOAuthCfg: NewGmailOAuthConfig(cfg),
 	}
+	h.exchangeGmailCode = func(ctx context.Context, code string) (*oauth2.Token, error) {
+		return ExchangeCode(ctx, h.gmailOAuthCfg, code)
+	}
+	h.persistGmailToken = func(ctx context.Context, userID uuid.UUID, refreshToken string) error {
+		return PersistGmailRefreshToken(ctx, h.pool, userID, refreshToken)
+	}
+	return h
 }
 
 // GoogleLogin redirects the user to Google's OAuth2 consent screen.
