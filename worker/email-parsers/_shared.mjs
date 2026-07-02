@@ -19,7 +19,9 @@
 //       remaining-document rescan per anchor (measured: 1.65MB -> 6.6s,
 //       O(n^2)). Capping every group's length makes each match attempt
 //       O(bound) instead of O(remaining document), i.e. linear overall.
-const MAX_HTML_LENGTH = 512 * 1024 // 512KB
+// Exported so other email-attacker-influenced-content consumers (currently
+// _llm.mjs's LLM fallback) share the same cap instead of picking their own.
+export const MAX_HTML_LENGTH = 512 * 1024 // 512KB
 const JOB_CARD_RE = /<a href="([^"]{1,2000})">([^<]{1,500})<\/a>[\s\S]{0,500}?<span class="company">([^<]{1,500})<\/span>/g
 
 const HTML_ENTITIES = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'" }

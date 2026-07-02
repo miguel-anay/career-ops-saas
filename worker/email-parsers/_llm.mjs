@@ -7,6 +7,7 @@
 // Prefixed with _ so it is never mistaken for a registered sender parser
 // (mirrors email-parsers/_shared.mjs / providers/_http.mjs convention).
 import { evaluate } from '../lib/anthropic.mjs'
+import { MAX_HTML_LENGTH } from './_shared.mjs'
 
 const SYSTEM_PROMPT = `You extract job postings from a job-alert email sent by a job board (LinkedIn, Indeed, Computrabajo, Bumeran, etc).
 Given the email subject and body, return a JSON array of the job postings found, each shaped as:
@@ -22,7 +23,12 @@ Respond with ONLY the JSON array — no prose, no markdown fences.`
  * @returns {Promise<Array<{title: string, company: string, url: string}>>}
  */
 export async function parseEmailWithLLM({ subject, html, text }) {
-  const userContent = `Subject: ${subject}\n\n${text || html || ''}`
+  // Same cap as the deterministic parsers (_shared.mjs): email body is
+  // attacker-influenced content. Truncation (not rejection) is fine here —
+  // this is a best-effort fallback, and a partial body still bounds the
+  // token cost instead of paying for a multi-MB adversarial message.
+  const body = (text || html || '').slice(0, MAX_HTML_LENGTH)
+  const userContent = `Subject: ${subject}\n\n${body}`
 
   const message = await evaluate(
     [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],

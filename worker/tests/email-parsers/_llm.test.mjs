@@ -1,4 +1,5 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { MAX_HTML_LENGTH } from '../../email-parsers/_shared.mjs'
 
 const mockEvaluate = vi.fn()
 
@@ -11,6 +12,17 @@ const { parseEmailWithLLM } = await import('../../email-parsers/_llm.mjs')
 describe('parseEmailWithLLM', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+  })
+
+  it('caps oversized html before building the prompt (bounded LLM token cost)', async () => {
+    mockEvaluate.mockResolvedValue({ content: [{ type: 'text', text: '[]' }] })
+    const oversizedHtml = 'a'.repeat(MAX_HTML_LENGTH + 10_000)
+
+    await parseEmailWithLLM({ subject: 's', html: oversizedHtml, text: '' })
+
+    expect(mockEvaluate).toHaveBeenCalledTimes(1)
+    const [, userContent] = mockEvaluate.mock.calls[0]
+    expect(userContent.length).toBeLessThanOrEqual(MAX_HTML_LENGTH + 200) // + subject/prefix overhead
   })
 
   it('calls evaluate once and returns the parsed job array from the LLM response', async () => {
