@@ -3,9 +3,11 @@ import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/re
 import React from 'react'
 import { EmailIngestButtons } from '../../../features/email-ingest/EmailIngestButtons'
 
-const { mockApiGet, mockApiPost } = vi.hoisted(() => ({
+const { mockApiGet, mockApiPost, mockToastSuccess, mockToastError } = vi.hoisted(() => ({
   mockApiGet: vi.fn(),
   mockApiPost: vi.fn(),
+  mockToastSuccess: vi.fn(),
+  mockToastError: vi.fn(),
 }))
 
 vi.mock('../../../lib/api', () => ({
@@ -14,7 +16,7 @@ vi.mock('../../../lib/api', () => ({
 }))
 
 vi.mock('sonner', () => ({
-  toast: { success: vi.fn(), error: vi.fn() },
+  toast: { success: mockToastSuccess, error: mockToastError },
 }))
 
 describe('EmailIngestButtons', () => {
@@ -22,6 +24,8 @@ describe('EmailIngestButtons', () => {
     cleanup()
     mockApiGet.mockReset()
     mockApiPost.mockReset()
+    mockToastSuccess.mockReset()
+    mockToastError.mockReset()
     // jsdom's window.location is not directly assignable; replace it wholesale.
     delete (window as unknown as { location?: unknown }).location
     window.location = { href: '' } as unknown as Location
@@ -101,5 +105,53 @@ describe('EmailIngestButtons', () => {
       const button = screen.getByRole('button', { name: /sync email alerts/i })
       expect(button).not.toBeDisabled()
     })
+  })
+
+  it('stops polling after the max attempt ceiling and surfaces a neutral timeout message', async () => {
+    mockApiPost.mockResolvedValueOnce({ ingest_run_id: 'run-3' })
+    // The run never reaches a terminal state — simulates a stuck job.
+    mockApiGet.mockResolvedValue({ id: 'run-3', status: 'running' })
+
+    render(<EmailIngestButtons pollIntervalMs={5} maxPollAttempts={3} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /sync email alerts/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/timed out/i)).toBeTruthy()
+    }, { timeout: 2000 })
+
+    const button = screen.getByRole('button', { name: /sync email alerts/i })
+    expect(button).not.toBeDisabled()
+
+    const callCountAtTimeout = mockApiGet.mock.calls.length
+    expect(callCountAtTimeout).toBeLessThanOrEqual(3)
+
+    // No further polling after the ceiling is hit.
+    await new Promise((r) => setTimeout(r, 30))
+    expect(mockApiGet.mock.calls.length).toBe(callCountAtTimeout)
+  })
+
+  it('does not update state or fire toasts once unmounted while a poll request is in flight', async () => {
+    mockApiPost.mockResolvedValueOnce({ ingest_run_id: 'run-4' })
+    let resolvePoll: (value: { id: string; status: string; new_jobs: number }) => void = () => {}
+    mockApiGet.mockImplementationOnce(
+      () => new Promise((resolve) => { resolvePoll = resolve })
+    )
+
+    const { unmount } = render(<EmailIngestButtons pollIntervalMs={5} />)
+    fireEvent.click(screen.getByRole('button', { name: /sync email alerts/i }))
+
+    await waitFor(() => {
+      expect(mockApiGet).toHaveBeenCalled()
+    })
+
+    unmount()
+    resolvePoll({ id: 'run-4', status: 'completed', new_jobs: 1 })
+
+    // Let the now-resolved in-flight promise's .then handlers run.
+    await new Promise((r) => setTimeout(r, 20))
+
+    const { toast } = await import('sonner')
+    expect(toast.success).not.toHaveBeenCalled()
   })
 })
