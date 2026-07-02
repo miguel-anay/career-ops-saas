@@ -42,7 +42,11 @@ var ErrNotFound = errors.New("not found")
 // update the user record. This bypasses RLS because the tenant user_id is not
 // yet known at OAuth callback time.
 func UpsertUser(ctx context.Context, pool *pgxpool.Pool, googleUser *GoogleUser) (*db.User, error) {
-	const query = `SELECT * FROM auth_upsert_user($1, $2, $3)`
+	// Explicit column list: auth_upsert_user RETURNS users, so SELECT * grows
+	// with every users migration and breaks the positional scan below (006
+	// added google_refresh_token and login 500'd until this was pinned).
+	const query = `SELECT id, email, google_id, plan, cv_markdown, profile_json, created_at
+		FROM auth_upsert_user($1, $2, $3)`
 
 	row := pool.QueryRow(ctx, query, googleUser.Email, googleUser.ID, googleUser.Name)
 
