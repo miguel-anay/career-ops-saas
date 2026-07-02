@@ -5,7 +5,6 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { apiGet, apiPost } from '@/lib/api'
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080'
 const TERMINAL_STATUSES = new Set(['completed', 'partial', 'error'])
 const DEFAULT_POLL_INTERVAL_MS = 2000
 
@@ -36,8 +35,16 @@ export function EmailIngestButtons({ onSynced, pollIntervalMs = DEFAULT_POLL_INT
 
   useEffect(() => stopPolling, [stopPolling])
 
-  const handleConnectGmail = () => {
-    window.location.href = `${API_URL}/auth/google/gmail`
+  const handleConnectGmail = async () => {
+    try {
+      // Bearer-authenticated endpoint — must go through apiGet (attaches the
+      // token, handles refresh), never a plain window.location navigation
+      // (which sends no Authorization header and would always 401).
+      const { auth_url } = await apiGet<{ auth_url: string }>('/auth/google/gmail')
+      window.location.href = auth_url
+    } catch {
+      toast.error('Failed to start Gmail connection')
+    }
   }
 
   const pollRun = useCallback((runId: string) => {

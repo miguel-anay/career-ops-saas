@@ -42,6 +42,12 @@ async function request<T>(
     method,
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
+    // API and web run on different origins (localhost:8080 vs :3000) — the
+    // API's CORS middleware already allows credentials for the configured
+    // origin, but the browser only stores/sends cross-origin cookies when
+    // the request opts in. Needed for the gmail_oauth_state CSRF cookie set
+    // by GET /auth/google/gmail to round-trip via this client.
+    credentials: 'include',
   })
 
   if (response.status === 401 && !isRetry) {

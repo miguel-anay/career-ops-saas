@@ -27,12 +27,38 @@ describe('EmailIngestButtons', () => {
     window.location = { href: '' } as unknown as Location
   })
 
-  it('"Connect Gmail" navigates to /auth/google/gmail', () => {
+  it('"Connect Gmail" fetches the auth_url via the authenticated apiGet client, then navigates to it', async () => {
+    // A plain window.location.href navigation to the API carries no
+    // Authorization header — the endpoint is Bearer-authenticated, so it
+    // MUST be reached through lib/api.ts's apiGet (token refresh included),
+    // and only the returned auth_url is used for the actual browser nav.
+    mockApiGet.mockResolvedValueOnce({ auth_url: 'https://accounts.google.com/o/oauth2/auth?scope=gmail.readonly&state=abc' })
+
     render(<EmailIngestButtons />)
 
     fireEvent.click(screen.getByRole('button', { name: /connect gmail/i }))
 
-    expect(window.location.href).toContain('/auth/google/gmail')
+    await waitFor(() => {
+      expect(mockApiGet).toHaveBeenCalledWith('/auth/google/gmail')
+    })
+
+    await waitFor(() => {
+      expect(window.location.href).toBe('https://accounts.google.com/o/oauth2/auth?scope=gmail.readonly&state=abc')
+    })
+  })
+
+  it('"Connect Gmail" surfaces an error toast and does not navigate when the fetch fails', async () => {
+    mockApiGet.mockRejectedValueOnce(new Error('API error 401: unauthorized'))
+
+    render(<EmailIngestButtons />)
+
+    fireEvent.click(screen.getByRole('button', { name: /connect gmail/i }))
+
+    const { toast } = await import('sonner')
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalled()
+    })
+    expect(window.location.href).toBe('')
   })
 
   it('"Sync email alerts" triggers POST /api/email-ingest and polls the run until completed', async () => {
