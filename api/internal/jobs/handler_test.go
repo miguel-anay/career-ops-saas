@@ -302,3 +302,83 @@ func TestGetByID_ServiceError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	svc.AssertExpectations(t)
 }
+
+// TestGetByID_SerializesNullablesAsPlainJSON pins the wire contract the web
+// expects (web/features/jobs/types.ts: platform string, received_at string):
+// nullable columns must serialize as plain values or null, never as Go
+// wrapper objects like {"String":...,"Valid":...} — those crash React when
+// rendered (issue #40).
+func TestGetByID_SerializesNullablesAsPlainJSON(t *testing.T) {
+	svc := &MockService{}
+	h := jobs.NewHandler(svc)
+
+	userID := uuid.New()
+	jobID := uuid.New()
+	job := &db.Job{
+		ID:       jobID,
+		UserID:   userID,
+		Title:    "Engineer",
+		Company:  "Acme",
+		Url:      "https://example.com/job/1",
+		Status:   db.JobStatusTNew,
+		Platform: sql.NullString{String: "linkedin", Valid: true},
+	}
+
+	svc.On("GetByID", mock.Anything, userID, jobID).Return(job, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/jobs/"+jobID.String(), nil)
+	ctx := newChiCtx(map[string]string{"id": jobID.String()})
+	ctx = middleware.SetUserID(ctx, userID)
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	h.GetByID(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp map[string]interface{}
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, "linkedin", resp["platform"])
+	assert.Nil(t, resp["scraped_content"])
+	assert.Nil(t, resp["received_at"])
+
+	svc.AssertExpectations(t)
+}
+
+// TestList_SerializesNullablesAsPlainJSON: same wire contract for the list
+// endpoint (the dashboard calls formatDate(job.received_at)).
+func TestList_SerializesNullablesAsPlainJSON(t *testing.T) {
+	svc := &MockService{}
+	h := jobs.NewHandler(svc)
+
+	userID := uuid.New()
+	expectedJobs := []db.Job{{
+		ID:       uuid.New(),
+		UserID:   userID,
+		Title:    "Engineer",
+		Company:  "Acme",
+		Url:      "https://example.com/job/1",
+		Status:   db.JobStatusTNew,
+		Platform: sql.NullString{String: "greenhouse", Valid: true},
+	}}
+
+	svc.On("List", mock.Anything, userID, 1, 20).Return(expectedJobs, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/jobs", nil)
+	req = req.WithContext(middleware.SetUserID(req.Context(), userID))
+	rec := httptest.NewRecorder()
+
+	h.List(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var body struct {
+		Jobs []map[string]interface{} `json:"jobs"`
+	}
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&body))
+	require.Len(t, body.Jobs, 1)
+	assert.Equal(t, "greenhouse", body.Jobs[0]["platform"])
+	assert.Nil(t, body.Jobs[0]["received_at"])
+
+	svc.AssertExpectations(t)
+}
