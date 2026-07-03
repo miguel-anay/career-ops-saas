@@ -3,6 +3,7 @@ package tracker_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -232,5 +233,46 @@ func TestUpdate_NotFound(t *testing.T) {
 	h.Update(rec, req)
 
 	assert.Equal(t, http.StatusNotFound, rec.Code)
+	svc.AssertExpectations(t)
+}
+
+// TestList_SerializesNullablesAsPlainJSON pins the wire contract the tracker
+// page expects (app.score.toFixed, app.pdf_path href): nullable columns must
+// serialize as plain values or null, never sql.Null* wrapper objects — those
+// crash React (issue #40, same family as the jobs endpoints).
+func TestList_SerializesNullablesAsPlainJSON(t *testing.T) {
+	svc := &MockService{}
+	h := tracker.NewHandler(svc)
+
+	userID := uuid.New()
+	apps := []db.Application{{
+		ID:        uuid.New(),
+		UserID:    userID,
+		JobID:     uuid.New(),
+		Score:     sql.NullFloat64{Float64: 4.2, Valid: true},
+		Status:    db.AppStatusTEvaluated,
+		Notes:     sql.NullString{},
+		PdfPath:   sql.NullString{},
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}}
+	svc.On("ListApplications", mock.Anything, userID, 1, 20).Return(apps, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/applications", nil)
+	req = req.WithContext(middleware.SetUserID(req.Context(), userID))
+	rec := httptest.NewRecorder()
+
+	h.List(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var body struct {
+		Applications []map[string]interface{} `json:"applications"`
+	}
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&body))
+	require.Len(t, body.Applications, 1)
+	assert.Equal(t, 4.2, body.Applications[0]["score"])
+	assert.Nil(t, body.Applications[0]["notes"])
+	assert.Nil(t, body.Applications[0]["pdf_path"])
+
 	svc.AssertExpectations(t)
 }
