@@ -1,5 +1,4 @@
 import PgBoss from 'pg-boss'
-import 'dotenv/config'
 
 // The worker runs as the restricted RLS role (app_user), which has no CREATE
 // on the database. The pgboss schema is provisioned out-of-band by the admin

@@ -1,6 +1,7 @@
 import { tenantQuery, pool } from '../lib/db.mjs'
 import { buildIngestPrompt } from '../lib/ingest-prompt.mjs'
-import { ingestCV } from '../lib/anthropic.mjs'
+import { ingestCV as anthropicIngestCV } from '../lib/anthropic.mjs'
+import { ingestCV as openaiCompatIngestCV } from '../lib/openai-compat.mjs'
 import { notify } from '../lib/progress.mjs'
 
 /**
@@ -75,6 +76,9 @@ export async function handleIngestCV(job) {
       `UPDATE cv_ingestions SET status = 'processing' WHERE id = $1::uuid`,
       [run_id]
     )
+
+    const useAnthropic = (process.env.EVALUATOR || 'anthropic') === 'anthropic'
+    const ingestCV = useAnthropic ? anthropicIngestCV : openaiCompatIngestCV
 
     try {
       const prompt = buildIngestPrompt(raw_cv)
