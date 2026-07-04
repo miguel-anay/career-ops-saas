@@ -57,12 +57,13 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list jobs", "internal_error")
 		return
 	}
-	if jobList == nil {
-		jobList = []db.Job{}
+	jobsOut := make([]map[string]interface{}, 0, len(jobList))
+	for _, j := range jobList {
+		jobsOut = append(jobsOut, jobJSON(j))
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"jobs":  jobList,
+		"jobs":  jobsOut,
 		"page":  page,
 		"limit": limit,
 	})
@@ -90,17 +91,40 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	platform := ""
-	if job.Platform.Valid {
-		platform = job.Platform.String
-	}
+	writeJSON(w, http.StatusCreated, jobJSON(*job))
+}
 
-	writeJSON(w, http.StatusCreated, map[string]interface{}{
-		"id":       job.ID,
-		"url":      job.Url,
-		"status":   job.Status,
-		"platform": platform,
-	})
+// jobJSON maps a db.Job to the wire shape the web expects
+// (web/features/jobs/types.ts): nullable columns as plain values or null,
+// never sql.Null* wrapper objects — rendering {"String":...,"Valid":...}
+// crashes React (issue #40).
+func jobJSON(j db.Job) map[string]interface{} {
+	out := map[string]interface{}{
+		"id":              j.ID,
+		"user_id":         j.UserID,
+		"title":           j.Title,
+		"company":         j.Company,
+		"url":             j.Url,
+		"status":          j.Status,
+		"created_at":      j.CreatedAt,
+		"platform":        nil,
+		"scraped_content": nil,
+		"received_at":     nil,
+		"evaluation_json": nil,
+	}
+	if j.Platform.Valid {
+		out["platform"] = j.Platform.String
+	}
+	if j.ScrapedContent.Valid {
+		out["scraped_content"] = j.ScrapedContent.String
+	}
+	if j.ReceivedAt.Valid {
+		out["received_at"] = j.ReceivedAt.Time
+	}
+	if j.EvaluationJson.Valid {
+		out["evaluation_json"] = json.RawMessage(j.EvaluationJson.RawMessage)
+	}
+	return out
 }
 
 // GetByID handles GET /api/jobs/{id}
@@ -128,7 +152,7 @@ func (h *Handler) GetByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, job)
+	writeJSON(w, http.StatusOK, jobJSON(*job))
 }
 
 // queryIntDefault parses an integer query param or returns the default value.

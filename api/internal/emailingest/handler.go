@@ -83,13 +83,20 @@ func (h *Handler) GetIngestRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// finished_at: plain timestamp or null, never the sql.NullTime wrapper
+	// object — rendering {"Time":...,"Valid":...} crashes React (issue #40).
+	var finishedAt interface{}
+	if run.FinishedAt.Valid {
+		finishedAt = run.FinishedAt.Time
+	}
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"id":          run.ID,
 		"status":      run.Status,
 		"new_jobs":    run.NewJobs,
 		"errors":      run.ErrorsJson,
 		"started_at":  run.StartedAt,
-		"finished_at": run.FinishedAt,
+		"finished_at": finishedAt,
 	})
 }
 

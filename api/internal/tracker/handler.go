@@ -55,11 +55,43 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	appsOut := make([]map[string]interface{}, 0, len(apps))
+	for _, a := range apps {
+		appsOut = append(appsOut, applicationJSON(a))
+	}
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"applications": apps,
+		"applications": appsOut,
 		"page":         page,
 		"limit":        limit,
 	})
+}
+
+// applicationJSON maps a db.Application to the wire shape the tracker page
+// expects: nullable columns as plain values or null, never sql.Null* wrapper
+// objects — rendering {"String":...,"Valid":...} crashes React (issue #40).
+func applicationJSON(a db.Application) map[string]interface{} {
+	out := map[string]interface{}{
+		"id":         a.ID,
+		"user_id":    a.UserID,
+		"job_id":     a.JobID,
+		"status":     a.Status,
+		"created_at": a.CreatedAt,
+		"updated_at": a.UpdatedAt,
+		"score":      nil,
+		"notes":      nil,
+		"pdf_path":   nil,
+	}
+	if a.Score.Valid {
+		out["score"] = a.Score.Float64
+	}
+	if a.Notes.Valid {
+		out["notes"] = a.Notes.String
+	}
+	if a.PdfPath.Valid {
+		out["pdf_path"] = a.PdfPath.String
+	}
+	return out
 }
 
 // Update handles PATCH /api/applications/{id} {status?, notes?}
@@ -104,7 +136,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, app)
+	writeJSON(w, http.StatusOK, applicationJSON(*app))
 }
 
 func queryIntDefault(r *http.Request, key string, def int) int {
