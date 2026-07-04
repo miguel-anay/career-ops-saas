@@ -16,6 +16,7 @@ import (
 	"github.com/miguel-anay/career-ops-saas/api/internal/companies"
 	"github.com/miguel-anay/career-ops-saas/api/internal/config"
 	"github.com/miguel-anay/career-ops-saas/api/internal/cv"
+	"github.com/miguel-anay/career-ops-saas/api/internal/emailingest"
 	"github.com/miguel-anay/career-ops-saas/api/internal/evaluate"
 	"github.com/miguel-anay/career-ops-saas/api/internal/jobs"
 	"github.com/miguel-anay/career-ops-saas/api/internal/middleware"
@@ -119,6 +120,10 @@ func main() {
 		// T-38: Tracker domain.
 		trackerHandler := tracker.NewHandler(tracker.NewService(pool))
 		trackerHandler.RegisterRoutes(r)
+
+		// gmail-job-ingestion PR2: Email ingest trigger domain.
+		emailIngestHandler := emailingest.NewHandler(emailingest.NewService(pool))
+		emailIngestHandler.RegisterRoutes(r)
 	})
 
 	// 8. WebSocket hub + listener (T-39..T-43).
