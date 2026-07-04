@@ -112,6 +112,61 @@ describe('buildEvaluationPrompt', () => {
     expect(result.messages[0].content).toContain(scrapedContent)
   })
 
+  it('includes the posting age in the user message when the job has a received_at', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-30T00:00:00.000Z'))
+
+    mockTenantQuery
+      .mockResolvedValueOnce({
+        rows: [{ cv_markdown: '# CV', profile_json: '{}' }],
+      })
+      .mockResolvedValueOnce({
+        rows: [{
+          scraped_content: 'JD content',
+          title: 'Engineer',
+          company: 'Corp',
+          url: 'https://corp.com/job',
+          received_at: '2026-06-25T00:00:00.000Z',
+        }],
+      })
+
+    const result = await buildEvaluationPrompt('uid', 'jid', { tenantQuery: mockTenantQuery })
+
+    expect(result.messages[0].content).toMatch(/posted 5 days ago/)
+
+    vi.useRealTimers()
+  })
+
+  it('includes STAR-mapping and negotiation-guidance instructions in the system prompt', async () => {
+    mockTenantQuery
+      .mockResolvedValueOnce({ rows: [{ cv_markdown: '# CV', profile_json: '{}' }] })
+      .mockResolvedValueOnce({
+        rows: [{ scraped_content: 'JD', title: 'Eng', company: 'Corp', url: 'https://c.com/j' }],
+      })
+
+    const result = await buildEvaluationPrompt('uid', 'jid', { tenantQuery: mockTenantQuery })
+    const staticSystemPrompt = result.system[0].text
+
+    expect(staticSystemPrompt).toMatch(/STAR/)
+    expect(staticSystemPrompt.toLowerCase()).toContain('negotiation')
+  })
+
+  it('still requests exactly 7 blocks (A-G) with unchanged field names', async () => {
+    mockTenantQuery
+      .mockResolvedValueOnce({ rows: [{ cv_markdown: '# CV', profile_json: '{}' }] })
+      .mockResolvedValueOnce({
+        rows: [{ scraped_content: 'JD', title: 'Eng', company: 'Corp', url: 'https://c.com/j' }],
+      })
+
+    const result = await buildEvaluationPrompt('uid', 'jid', { tenantQuery: mockTenantQuery })
+    const staticSystemPrompt = result.system[0].text
+
+    const blockHeaders = staticSystemPrompt.match(/##\s+Block\s+[A-G]\s*[—–-]/g) || []
+    expect(blockHeaders).toHaveLength(7)
+    expect(staticSystemPrompt).toContain('Score: X.X/5')
+    expect(staticSystemPrompt).toContain('Tier: 1-5')
+  })
+
   it('fetches user and job using tenantQuery with userId', async () => {
     const userId = 'specific-user-id'
     const jobId = 'specific-job-id'
