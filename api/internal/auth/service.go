@@ -14,6 +14,25 @@ import (
 	"github.com/miguel-anay/career-ops-saas/api/internal/platform"
 )
 
+// PersistGmailRefreshToken upserts the Gmail incremental-consent refresh
+// token onto userID's row via platform.WithTenantTx, so the write is RLS
+// scoped exactly like every other tenant-table access. A second call with a
+// new token REPLACES the previous one (spec scenario "re-consent replaces
+// existing token") — there is no history, just the latest token.
+func PersistGmailRefreshToken(ctx context.Context, pool *pgxpool.Pool, userID uuid.UUID, refreshToken string) error {
+	err := platform.WithTenantTx(ctx, pool, userID, func(q *db.Queries) error {
+		_, err := q.UpdateUserGoogleRefreshToken(ctx, db.UpdateUserGoogleRefreshTokenParams{
+			ID:                 userID,
+			GoogleRefreshToken: sql.NullString{String: refreshToken, Valid: true},
+		})
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("persist gmail refresh token: %w", err)
+	}
+	return nil
+}
+
 // ErrNotFound is returned when a user does not exist for the requesting
 // tenant's RLS-scoped view (cross-tenant lookups surface this rather than
 // the other tenant's row).
@@ -23,7 +42,11 @@ var ErrNotFound = errors.New("not found")
 // update the user record. This bypasses RLS because the tenant user_id is not
 // yet known at OAuth callback time.
 func UpsertUser(ctx context.Context, pool *pgxpool.Pool, googleUser *GoogleUser) (*db.User, error) {
-	const query = `SELECT * FROM auth_upsert_user($1, $2, $3)`
+	// Explicit column list: auth_upsert_user RETURNS users, so SELECT * grows
+	// with every users migration and breaks the positional scan below (006
+	// added google_refresh_token and login 500'd until this was pinned).
+	const query = `SELECT id, email, google_id, plan, cv_markdown, profile_json, created_at
+		FROM auth_upsert_user($1, $2, $3)`
 
 	row := pool.QueryRow(ctx, query, googleUser.Email, googleUser.ID, googleUser.Name)
 

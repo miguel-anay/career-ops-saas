@@ -25,3 +25,9 @@ UPDATE users
 SET profile_json = $2
 WHERE id = $1
 RETURNING *;
+
+-- name: UpdateUserGoogleRefreshToken :one
+UPDATE users
+SET google_refresh_token = $2
+WHERE id = $1
+RETURNING *;
