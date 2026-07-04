@@ -6,6 +6,7 @@ const mockHandleScanCompany = vi.fn()
 const mockHandleEvaluateJob = vi.fn()
 const mockHandleGeneratePDF = vi.fn()
 const mockHandleIngestCV = vi.fn()
+const mockHandleIngestEmail = vi.fn()
 const mockListen = vi.fn()
 const mockGet = vi.fn()
 
@@ -28,6 +29,10 @@ vi.mock('../jobs/pdf.mjs', () => ({
 
 vi.mock('../jobs/ingest-cv.mjs', () => ({
   handleIngestCV: mockHandleIngestCV,
+}))
+
+vi.mock('../jobs/ingest-email.mjs', () => ({
+  handleIngestEmail: mockHandleIngestEmail,
 }))
 
 vi.mock('express', () => ({
@@ -55,5 +60,16 @@ describe('worker index bootstrap', () => {
     expect(ingestCall).toBeDefined()
     expect(ingestCall[1]).toBe(mockHandleIngestCV)
     expect(ingestCall[2]).toEqual({ teamSize: 5 })
+  })
+
+  it('registers the ingest-email job handler with teamSize 5', async () => {
+    vi.resetModules()
+    await import('../index.mjs')
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    const ingestEmailCall = mockRegisterWorker.mock.calls.find(call => call[0] === 'ingest-email')
+    expect(ingestEmailCall).toBeDefined()
+    expect(ingestEmailCall[1]).toBe(mockHandleIngestEmail)
+    expect(ingestEmailCall[2]).toEqual({ teamSize: 5 })
   })
 })

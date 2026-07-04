@@ -5,6 +5,7 @@ import { handleScanCompany } from './jobs/scan.mjs'
 import { handleEvaluateJob } from './jobs/evaluate.mjs'
 import { handleGeneratePDF } from './jobs/pdf.mjs'
 import { handleIngestCV } from './jobs/ingest-cv.mjs'
+import { handleIngestEmail } from './jobs/ingest-email.mjs'
 
 const PORT = process.env.WORKER_PORT || 3002
 
@@ -36,6 +37,11 @@ async function main() {
     teamSize: 5,
   })
   console.log('[worker] Registered handler: ingest-cv')
+
+  await registerWorker('ingest-email', handleIngestEmail, {
+    teamSize: 5,
+  })
+  console.log('[worker] Registered handler: ingest-email')
 
   // Express health endpoint
   const app = express()
