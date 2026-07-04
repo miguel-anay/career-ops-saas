@@ -29,7 +29,10 @@ describe('EvaluateJob.run', () => {
     expect(evaluationArg.isParseError).toBe(false)
     expect(evaluationArg.score).toBe(4.1)
     expect(evaluationArg.contentMd).toBe(VALID_RESPONSE_TEXT)
-    expect(evaluationArg.blocks.blockA.score).toBe(4.2)
+    expect(evaluationArg.blocks).toEqual([
+      { label: 'Role & Company Fit', content: 'Score: 4.2/5\nStrong alignment.' },
+      { label: 'Technical Match', content: 'Score: 4.5/5\nAll required skills present.' },
+    ])
     expect(evaluationArg.statusNote).toBeNull()
   })
 

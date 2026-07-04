@@ -25,7 +25,12 @@ describe('PgEvaluationRepository.save', () => {
 
     const repository = new PgEvaluationRepository({ tenantQuery: fakeTenantQuery })
 
-    const blocks = { blockA: { title: 'Role Fit', content: 'Strong', score: 4.2 } }
+    // blocks_json is persisted as an array of {label, content} (A→G order),
+    // not the legacy letter-keyed object — see EvaluationParser's array flip
+    // (evaluation-quality change). save() itself needs no shape-specific
+    // code: JSON.stringify(evaluation.blocks) serializes whatever shape the
+    // parser produced.
+    const blocks = [{ label: 'Role Fit', content: 'Strong' }]
     const evaluation = Evaluation.fromBlocks(blocks, 4.1, 'raw markdown content')
 
     await repository.save('user-1', 'job-1', evaluation)
