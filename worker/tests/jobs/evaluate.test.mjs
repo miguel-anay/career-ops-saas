@@ -92,8 +92,8 @@ Tier: 1 — Verified Direct
 
     await handleEvaluateJob(job)
 
-    // Should have called tenantQuery 4 times (insert app, insert report, upsert usage, update job)
-    expect(mockTenantQuery).toHaveBeenCalledTimes(4)
+    // Should have called tenantQuery 5 times (upsert app, delete stale report, insert report, upsert usage, update job)
+    expect(mockTenantQuery).toHaveBeenCalledTimes(5)
 
     // applications INSERT carries the parsed overall score and no status note
     const appCall = mockTenantQuery.mock.calls[0]
@@ -101,7 +101,7 @@ Tier: 1 — Verified Direct
     expect(appCall[2]).toEqual(['user-1', 'job-1', 4.1, null])
 
     // Usage upsert call should increment evaluations_count
-    const usageCall = mockTenantQuery.mock.calls[2]
+    const usageCall = mockTenantQuery.mock.calls[3]
     expect(usageCall[1]).toContain('evaluations_count')
   })
 
@@ -120,9 +120,10 @@ Tier: 1 — Verified Direct
 
     mockAnthropicEvaluate.mockResolvedValue(garbledResponse)
 
-    // tenantQuery for: INSERT applications (with parse_error), INSERT reports, UPSERT usage, UPDATE jobs
+    // tenantQuery for: UPSERT applications (with parse_error), DELETE stale reports, INSERT reports, UPSERT usage, UPDATE jobs
     mockTenantQuery
       .mockResolvedValueOnce({ rows: [{ id: 'app-uuid' }] })
+      .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ id: 'report-uuid' }] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
@@ -138,7 +139,7 @@ Tier: 1 — Verified Direct
     expect(mockTenantQuery).toHaveBeenCalled()
     // Find the reports insertion call and verify it has blocks_json
     const reportInsertCall = mockTenantQuery.mock.calls.find(
-      call => typeof call[1] === 'string' && call[1].includes('reports')
+      call => typeof call[1] === 'string' && call[1].includes('INSERT INTO reports')
     )
     expect(reportInsertCall).toBeDefined()
 
@@ -165,7 +166,7 @@ Tier: 1 — Verified Direct
 
     // Find the call that inserts into reports and check blocks_json
     const calls = mockTenantQuery.mock.calls
-    const reportCall = calls.find(c => typeof c[1] === 'string' && c[1].toLowerCase().includes('reports'))
+    const reportCall = calls.find(c => typeof c[1] === 'string' && c[1].includes('INSERT INTO reports'))
     expect(reportCall).toBeDefined()
 
     // The blocks_json parameter should be present in the params array
