@@ -40,8 +40,8 @@ func TestEvaluateRLS_Integration(t *testing.T) {
 	// (ground truth, bypasses RLS exactly like production setup/migrations would).
 	jobID := uuid.New()
 	_, err := h.AdminPool.Exec(ctx, `
-		INSERT INTO jobs (id, user_id, title, company, url, status)
-		VALUES ($1, $2, 'Pending', 'Unknown', $3, 'new')`,
+		INSERT INTO jobs (id, user_id, title, company, url, status, scraped_content)
+		VALUES ($1, $2, 'Pending', 'Unknown', $3, 'new', 'Some real job description content')`,
 		jobID, userA, "https://boards.greenhouse.io/acme/jobs/"+uuid.New().String())
 	require.NoError(t, err, "seed job for A via AdminPool")
 
@@ -75,6 +75,12 @@ func TestEvaluateRLS_Integration(t *testing.T) {
 	})
 
 	t.Run("owner EnqueueEvaluation still succeeds (job lookup + usage read, then enqueue)", func(t *testing.T) {
+		// The CV-missing content guard (evaluate.ErrCVMissing) runs before
+		// the usage-limit check this subtest proves; seed a CV so this
+		// remains a usage/enqueue test, not a guard test (covered by
+		// TestEnqueueEvaluation_CVMissing in service_test.go).
+		mustSetCVMarkdown(ctx, t, h, userA, "# CV\n\nExperience...")
+
 		queueID, err := svc.EnqueueEvaluation(ctx, userA, jobID)
 		require.NoError(t, err)
 		require.NotEmpty(t, queueID)
