@@ -86,7 +86,16 @@ export async function handleIngestEmail(job) {
         const parser = findParserForSender(decoded.from)
         if (!parser) continue // unrecognized sender — silently skip (spec)
 
-        const rawJobs = parser.parse(decoded) || []
+        let rawJobs = parser.parse(decoded) || []
+
+        // LLM fallback (Decision 9, Cost Invariant requirement): only reached
+        // when a matched sender's deterministic parser found nothing, and
+        // only imported when the flag is set — the default path never even
+        // loads lib/anthropic.mjs through this branch, guaranteeing 0 tokens.
+        if (rawJobs.length === 0 && process.env.EMAIL_PARSER_LLM_FALLBACK === 'true') {
+          const { parseEmailWithLLM } = await import('../email-parsers/_llm.mjs')
+          rawJobs = (await parseEmailWithLLM(decoded)) || []
+        }
 
         for (const raw of rawJobs) {
           const url = normalizeJobUrl(parser.id, raw.url)

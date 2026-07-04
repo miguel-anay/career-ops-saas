@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/table'
 import { apiGet, apiPost } from '@/lib/api'
 import { isAuthenticated } from '@/lib/auth'
+import { EmailIngestButtons } from '@/features/email-ingest/EmailIngestButtons'
 import { useScanProgress } from './hooks'
 import type { Job, JobsResponse } from './types'
 
@@ -137,6 +138,7 @@ export function JobsDashboard() {
           <Button onClick={handleScanNow} disabled={isScanning}>
             {isScanning ? 'Scanning…' : 'Scan Now'}
           </Button>
+          <EmailIngestButtons onSynced={() => loadJobs()} />
         </div>
       </div>
 
