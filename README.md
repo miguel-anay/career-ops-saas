@@ -10,7 +10,7 @@ Three-service monorepo backed by a single PostgreSQL instance:
 career-ops-saas/
 ├── api/          # Go + chi — auth, routing, WebSocket hub, job queue
 ├── worker/       # Node.js + Playwright — ATS scan, Anthropic evaluation, PDF
-├── web/          # Next.js + shadcn/ui — dashboard, job detail, tracker
+├── web/          # Next.js + shadcn/ui — dashboard, jobs, companies, CV, tracker
 ├── db/           # SQL schema, RLS policies, sqlc queries, migrations
 ├── docker-compose.yml
 ├── .env.example
@@ -39,7 +39,7 @@ cp .env.example .env
 docker compose up
 ```
 
-The API listens on :8080, the worker on :3001, and the web on :3000.  
+The API listens on :8080, the web on :3000, and the worker exposes a health endpoint on :3001 (it consumes jobs via pg-boss, not HTTP).  
 Migrations run automatically on first Postgres start.
 
 ### Option B — Hybrid (recommended for active development)
@@ -92,13 +92,25 @@ cd web && npx vitest run __tests__/jobs.test.tsx
 
 Use a managed Postgres 16 instance — **never** run the database on the same server as the application. Recommended options: [Neon](https://neon.tech) (serverless, free tier), [Railway](https://railway.app), or RDS.
 
-Run migrations once after provisioning:
+Run migrations once after provisioning. The migrations are the source of truth —
+each one is self-contained (schema + RLS policies + the `auth_upsert_user` function),
+the same set Docker applies on first boot:
 
 ```bash
-psql $DATABASE_URL -f db/migrations/001_initial.sql
-psql $DATABASE_URL -f db/rls.sql
-psql $DATABASE_URL -f db/auth_upsert_user.sql
+# 1. Schema + RLS + companies catalog — every migration, in order
+for f in db/migrations/*.sql; do psql "$DATABASE_URL" -f "$f"; done
+
+# 2. pg-boss queue schema. The runtime role (app_user) is RLS-subject and can't
+#    self-migrate, so the worker installs the schema as the admin role, then we
+#    grant app_user exactly the runtime privileges it needs.
+node worker/scripts/install-pgboss.mjs              # connects as the admin role
+psql "$PGBOSS_ADMIN_URL" -f db/pgboss_grants.sql    # run as the schema owner
 ```
+
+> `db/rls.sql` and `db/auth_upsert_user.sql` are legacy standalone files kept for
+> reference — their contents already live inside the migrations above, so you don't
+> run them separately. `db/pgboss_schema.generated.sql` is a test fixture, not a
+> deploy artifact.
 
 ### Services
 
