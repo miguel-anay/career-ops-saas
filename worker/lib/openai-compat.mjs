@@ -1,5 +1,3 @@
-import 'dotenv/config'
-
 // Generic OpenAI-compatible evaluator client.
 //
 // Almost every LLM host (Qwen/DashScope, DeepSeek, MiniMax, OpenAI, ...) exposes
@@ -36,6 +34,23 @@ function flattenSystem(systemBlocks) {
  * @param {string} userContent - The user message content (JD + output contract)
  * @returns {Promise<{choices: Array<{message: {content: string}}>}>}
  */
+/**
+ * Ingest a raw CV via an OpenAI-compatible chat endpoint.
+ *
+ * Same provider selection and config as evaluate(); normalises the response
+ * shape to match Anthropic's { content: [{ type: 'text', text }] } contract
+ * so ingest-cv.mjs can use either provider without branching on response shape.
+ *
+ * @param {Array<{type:string,text:string}>|string} systemBlocks
+ * @param {string} userContent - The user message content (raw CV + output contract)
+ * @returns {Promise<{content: Array<{type: string, text: string}>}>}
+ */
+export async function ingestCV(systemBlocks, userContent) {
+  const response = await evaluate(systemBlocks, userContent)
+  const text = response.choices?.[0]?.message?.content || ''
+  return { content: [{ type: 'text', text }] }
+}
+
 export async function evaluate(systemBlocks, userContent) {
   const provider = process.env.EVALUATOR || 'qwen'
   const preset = PRESETS[provider]

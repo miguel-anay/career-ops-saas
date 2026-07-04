@@ -1,5 +1,4 @@
 import pg from 'pg'
-import 'dotenv/config'
 
 const { Pool } = pg
 
@@ -23,7 +22,9 @@ export async function tenantQuery(userId, sql, params = []) {
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
-    await client.query(`SET LOCAL app.current_user_id = $1`, [userId])
+    // SET LOCAL cannot take bind parameters (Postgres 42601); set_config with
+    // is_local=true is the parameterized equivalent (issue #42 follow-up).
+    await client.query(`SELECT set_config('app.current_user_id', $1, true)`, [userId])
     const result = await client.query(sql, params)
     await client.query('COMMIT')
     return result

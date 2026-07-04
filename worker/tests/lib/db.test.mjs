@@ -36,7 +36,7 @@ describe('tenantQuery', () => {
     vi.clearAllMocks()
   })
 
-  it('calls SET LOCAL app.current_user_id before the main query', async () => {
+  it('sets app.current_user_id via set_config before the main query', async () => {
     const userId = 'user-123'
     const sql = 'SELECT * FROM jobs WHERE user_id = current_setting(\'app.current_user_id\')::uuid'
     const params = []
@@ -45,8 +45,10 @@ describe('tenantQuery', () => {
 
     // First call should be BEGIN
     expect(mockQuery).toHaveBeenNthCalledWith(1, 'BEGIN')
-    // Second call should be SET LOCAL
-    expect(mockQuery).toHaveBeenNthCalledWith(2, `SET LOCAL app.current_user_id = $1`, [userId])
+    // Second call sets the tenant GUC. Must be set_config($1, ..., true):
+    // SET LOCAL rejects bind parameters (42601) — pinned by the real-DB
+    // integration test in tests/integration/tenant-query-real-db.test.mjs.
+    expect(mockQuery).toHaveBeenNthCalledWith(2, `SELECT set_config('app.current_user_id', $1, true)`, [userId])
     // Third call should be the actual query
     expect(mockQuery).toHaveBeenNthCalledWith(3, sql, params)
     // Fourth call should be COMMIT

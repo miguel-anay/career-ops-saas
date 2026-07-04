@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { evaluate } from '../../lib/openai-compat.mjs'
+import { evaluate, ingestCV } from '../../lib/openai-compat.mjs'
 
 describe('openai-compat evaluate', () => {
   const realFetch = global.fetch
@@ -59,5 +59,44 @@ describe('openai-compat evaluate', () => {
   it('throws on an unknown provider with no base URL override', async () => {
     process.env.EVALUATOR = 'nonsense'
     await expect(evaluate([], 'x')).rejects.toThrow(/unknown provider/)
+  })
+})
+
+describe('openai-compat ingestCV', () => {
+  const realFetch = global.fetch
+
+  beforeEach(() => {
+    process.env.EVALUATOR = 'qwen'
+    process.env.LLM_API_KEY = 'test-key'
+    process.env.LLM_MODEL = 'qwen-plus'
+    delete process.env.LLM_BASE_URL
+  })
+
+  afterEach(() => {
+    global.fetch = realFetch
+    vi.restoreAllMocks()
+    delete process.env.EVALUATOR
+    delete process.env.LLM_API_KEY
+    delete process.env.LLM_MODEL
+    delete process.env.LLM_BASE_URL
+  })
+
+  it('normalises the OpenAI response to Anthropic shape { content: [{ type: text, text }] }', async () => {
+    const fakeOpenAIResponse = { choices: [{ message: { content: '===CV_MARKDOWN===\n# Jane\n\n===PROFILE_JSON===\n```json\n{}\n```' } }] }
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => fakeOpenAIResponse })
+
+    const result = await ingestCV([{ type: 'text', text: 'system' }], 'raw cv')
+
+    expect(result).toEqual({
+      content: [{ type: 'text', text: '===CV_MARKDOWN===\n# Jane\n\n===PROFILE_JSON===\n```json\n{}\n```' }],
+    })
+  })
+
+  it('returns empty text when choices are missing', async () => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) })
+
+    const result = await ingestCV([], 'x')
+
+    expect(result).toEqual({ content: [{ type: 'text', text: '' }] })
   })
 })

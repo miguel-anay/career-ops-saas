@@ -1,9 +1,10 @@
-// PgEvaluationRepository — adapter implementing EvaluationRepository by
-// reproducing, EXACTLY, the 4 SQL writes (same order, same column values)
-// that previously lived inline in `worker/jobs/evaluate.mjs`'s
-// `handleEvaluateJob`:
-//   1. INSERT into applications (score, status 'Evaluated', notes)
-//   2. INSERT into reports (content_md, blocks_json)
+// PgEvaluationRepository — adapter implementing EvaluationRepository:
+//   1. UPSERT applications (score, status 'Evaluated', notes) — ON CONFLICT
+//      (job_id) so re-evaluating an already-evaluated job updates in place
+//      instead of violating applications_job_id_key
+//   2. DELETE stale reports for the application, then INSERT the new one —
+//      GetReportByApplicationID reads LIMIT 1 with no ORDER BY, so exactly
+//      one report per application may exist
 //   3. UPSERT usage (evaluations_count +1 for current month)
 //   4. UPDATE jobs.status to 'evaluated'
 //
@@ -29,18 +30,27 @@ export class PgEvaluationRepository {
   async save(userId, jobId, evaluation) {
     const currentMonth = new Date().toISOString().slice(0, 7) // YYYY-MM
 
-    // 1. INSERT into applications
+    // 1. UPSERT into applications — re-evaluation updates the existing row
     const appResult = await this.#tenantQuery(
       userId,
       `INSERT INTO applications (user_id, job_id, score, status, notes)
        VALUES ($1::uuid, $2::uuid, $3, 'Evaluated', $4)
+       ON CONFLICT (job_id) DO UPDATE
+         SET score = EXCLUDED.score, status = 'Evaluated', notes = EXCLUDED.notes
        RETURNING id`,
       [userId, jobId, evaluation.score, evaluation.statusNote]
     )
 
     const applicationId = appResult.rows[0]?.id
 
-    // 2. INSERT into reports (always — T-58 ensures blocks_json is set even on parse error)
+    // 2. Replace the report: delete any stale one, then INSERT (always —
+    // T-58 ensures blocks_json is set even on parse error)
+    await this.#tenantQuery(
+      userId,
+      `DELETE FROM reports WHERE application_id = $1::uuid AND user_id = $2::uuid`,
+      [applicationId, userId]
+    )
+
     await this.#tenantQuery(
       userId,
       `INSERT INTO reports (user_id, application_id, content_md, blocks_json)

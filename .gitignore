@@ -42,3 +42,9 @@ playwright-report/
 
 # Local tooling cache (skill registry)
 .atl/
+
+# Personal notes / blog drafts — not project artifacts, kept out of the repo
+WORKFLOW.md
+
+# Claude Code local config
+.claude/
