@@ -3,6 +3,7 @@ import { notify } from '../lib/progress.mjs'
 import { getAccessToken, listMessages, getMessage, decodeMessage } from '../lib/gmail.mjs'
 import { allSenders, findParserForSender } from '../email-parsers/index.mjs'
 import { normalizeJobUrl } from '../lib/url-normalize.mjs'
+import boss from '../lib/queue.mjs'
 
 const MAX_MESSAGES = 50
 const LOOKBACK_DAYS = 14
@@ -123,6 +124,14 @@ export async function handleIngestEmail(job) {
               url,
               is_new: true,
             })
+            // Enqueue fetch-job-content for the new job (only host-allowlisted URLs
+            // will be processed; the handler's own SSRF gate enforces this).
+            try {
+              await boss.send('fetch-job-content', { user_id, job_id: row.id })
+            } catch (err) {
+              // Non-fatal — the job is stored; fetching the JD is best-effort.
+              console.error(`[ingest-email] failed to enqueue fetch-job-content for job ${row.id}:`, err.message)
+            }
           } else {
             dupCount++
           }

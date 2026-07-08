@@ -173,6 +173,37 @@ func (q *Queries) UpdateJobEvaluationJSON(ctx context.Context, arg UpdateJobEval
 	return i, err
 }
 
+const updateJobScrapedContent = `-- name: UpdateJobScrapedContent :one
+UPDATE jobs
+SET scraped_content = $2
+WHERE id = $1
+RETURNING id, user_id, title, company, url, platform, status, scraped_content, evaluation_json, received_at, created_at
+`
+
+type UpdateJobScrapedContentParams struct {
+	ID             uuid.UUID      `json:"id"`
+	ScrapedContent sql.NullString `json:"scraped_content"`
+}
+
+func (q *Queries) UpdateJobScrapedContent(ctx context.Context, arg UpdateJobScrapedContentParams) (Job, error) {
+	row := q.db.QueryRowContext(ctx, updateJobScrapedContent, arg.ID, arg.ScrapedContent)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Title,
+		&i.Company,
+		&i.Url,
+		&i.Platform,
+		&i.Status,
+		&i.ScrapedContent,
+		&i.EvaluationJson,
+		&i.ReceivedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const updateJobStatus = `-- name: UpdateJobStatus :one
 UPDATE jobs
 SET status = $2
