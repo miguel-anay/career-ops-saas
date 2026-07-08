@@ -4,6 +4,18 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080'
 
 type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE' | 'PUT'
 
+export class ApiError extends Error {
+  status: number
+  code: string | null
+
+  constructor(status: number, code: string | null, message: string) {
+    super(message)
+    this.status = status
+    this.code = code
+    this.name = 'ApiError'
+  }
+}
+
 async function refreshTokens(): Promise<boolean> {
   const refreshToken = getRefreshToken()
   if (!refreshToken) return false
@@ -64,7 +76,14 @@ async function request<T>(
 
   if (!response.ok) {
     const errorText = await response.text()
-    throw new Error(`API error ${response.status}: ${errorText}`)
+    let code: string | null = null
+    try {
+      const parsed = JSON.parse(errorText)
+      code = typeof parsed.code === 'string' ? parsed.code : null
+    } catch {
+      // best-effort — not all errors return JSON
+    }
+    throw new ApiError(response.status, code, errorText)
   }
 
   // Handle 204 No Content

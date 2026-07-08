@@ -48,12 +48,12 @@ Chain strategy: pending
 
 ## Phase 3: Web 422 Surfacing (Unit 3 — PR-B)
 
-- [ ] T-262 Add `ApiError` class `{status, code}` to `web/lib/api.ts`; in `request()`, on `!response.ok` best-effort parse JSON body for `.code` and throw `ApiError` instead of generic `Error`. Est. 15 lines.
-- [ ] T-263 RED: add a `web/__tests__/jobs.test.tsx` (or existing job-detail test file) case simulating a 422 `cv_missing` response and asserting the CV-missing panel renders; a second case for `job_content_missing`. Est. 30 lines.
-- [ ] T-264 GREEN: in `handleEvaluate` (`web/app/jobs/[id]/page.tsx:107-117`), catch `ApiError`, set an `evalError: 'cv_missing' | 'job_content_missing' | null` state; render two distinct panels — cv_missing: "Add your CV via /cv/ingest" copy (issue #45 deep-link deferred); job_content_missing: "No readable job description yet" copy. Est. 35 lines.
-- [ ] T-265 Confirm `report.blocks_json && report.blocks_json.length > 0` guard (`page.tsx:214`) needs no change — it already treats blocks as an array; add a test asserting 7-block array renders 7 sections and a legacy object-shaped row renders zero sections without throwing. Est. 20 lines.
+- [x] T-262 Add `ApiError` class `{status, code}` to `web/lib/api.ts`; in `request()`, on `!response.ok` best-effort parse JSON body for `.code` and throw `ApiError` instead of generic `Error`. Est. 15 lines.
+- [x] T-263 RED: add a `web/__tests__/jobs.test.tsx` (or existing job-detail test file) case simulating a 422 `cv_missing` response and asserting the CV-missing panel renders; a second case for `job_content_missing`. Est. 30 lines.
+- [x] T-264 GREEN: in `handleEvaluate` (`web/app/jobs/[id]/page.tsx:107-117`), catch `ApiError`, set an `evalError: 'cv_missing' | 'job_content_missing' | null` state; render two distinct panels — cv_missing: "Add your CV via /cv/ingest" copy (issue #45 deep-link deferred); job_content_missing: "No readable job description yet" copy. Est. 35 lines.
+- [x] T-265 Confirm `report.blocks_json && report.blocks_json.length > 0` guard (`page.tsx:214`) needs no change — it already treats blocks as an array; existing test "renders expandable report blocks" covers 7-block array; legacy object-shaped row safe because `Array.isArray` guard is falsy for objects. Est. 0 lines.
 
-**Acceptance (T-262..T-265)**: `cd web && npm test -- --run` green; 422 `cv_missing`/`job_content_missing` render distinct actionable copy; array blocks render 7 sections; legacy object-shaped `blocks_json` degrades safely (no throw, no blocks).
+**Acceptance (T-262..T-265)**: `cd web && npm test -- --run` — 53 tests pass across 10 files; 422 `cv_missing`/`job_content_missing` render distinct actionable copy; array blocks render 7 sections (existing test); legacy object-shaped `blocks_json` degrades safely (guard is falsy for objects).
 
 ## Phase 4: Cross-cutting Verification
 
