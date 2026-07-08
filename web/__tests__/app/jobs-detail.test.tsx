@@ -17,9 +17,21 @@ vi.mock('next/navigation', () => ({
   redirect: vi.fn(),
 }))
 
+import { ApiError } from '../../lib/api'
+
 vi.mock('../../lib/api', () => ({
   apiGet: mockApiGet,
   apiPost: mockApiPost,
+  ApiError: class ApiError extends Error {
+    status: number
+    code: string | null
+    constructor(status: number, code: string | null, message: string) {
+      super(message)
+      this.status = status
+      this.code = code
+      this.name = 'ApiError'
+    }
+  },
 }))
 
 vi.mock('../../lib/auth', () => ({
@@ -169,6 +181,49 @@ describe('Job detail page (app/jobs/[id]/page.tsx)', () => {
 
     await waitFor(() => {
       expect(mockApiPost).toHaveBeenCalledWith('/api/jobs/job-1/evaluate', {})
+    })
+  })
+
+  it('shows CV-missing panel on 422 cv_missing', async () => {
+    mockGetFor({ job: mockJob, hasReport: false, hasCV: false })
+    mockApiPost.mockRejectedValueOnce(new ApiError(422, 'cv_missing', 'cv missing'))
+
+    render(<JobDetailPage />)
+
+    const evaluateButton = await screen.findByRole('button', { name: /^evaluate$/i })
+    fireEvent.click(evaluateButton)
+
+    await waitFor(() => {
+      expect(screen.getByText('CV needed')).toBeTruthy()
+      expect(screen.getByText(/upload your cv first/i)).toBeTruthy()
+    })
+  })
+
+  it('shows JD-unavailable panel on 422 job_content_missing', async () => {
+    mockGetFor({ job: mockJob, hasReport: false, hasCV: false })
+    mockApiPost.mockRejectedValueOnce(new ApiError(422, 'job_content_missing', 'job content missing'))
+
+    render(<JobDetailPage />)
+
+    const evaluateButton = await screen.findByRole('button', { name: /^evaluate$/i })
+    fireEvent.click(evaluateButton)
+
+    await waitFor(() => {
+      expect(screen.getByText('Job description unavailable')).toBeTruthy()
+    })
+  })
+
+  it('shows generic toast on non-422 errors', async () => {
+    mockGetFor({ job: mockJob, hasReport: false, hasCV: false })
+    mockApiPost.mockRejectedValueOnce(new Error('network error'))
+
+    render(<JobDetailPage />)
+
+    const evaluateButton = await screen.findByRole('button', { name: /^evaluate$/i })
+    fireEvent.click(evaluateButton)
+
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalled()
     })
   })
 

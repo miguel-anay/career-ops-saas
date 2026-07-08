@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { apiGet, apiPost } from '@/lib/api'
+import { apiGet, apiPost, ApiError } from '@/lib/api'
 import { isAuthenticated } from '@/lib/auth'
 
 interface Job {
@@ -67,6 +67,7 @@ export default function JobDetailPage() {
   const [isEvaluating, setIsEvaluating] = useState(false)
   const [isGeneratingCV, setIsGeneratingCV] = useState(false)
   const [expandedBlocks, setExpandedBlocks] = useState<Set<string>>(new Set())
+  const [evalError, setEvalError] = useState<'cv_missing' | 'job_content_missing' | null>(null)
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -105,12 +106,17 @@ export default function JobDetailPage() {
   }, [jobId, router])
 
   const handleEvaluate = async () => {
+    setEvalError(null)
     setIsEvaluating(true)
     try {
       await apiPost(`/api/jobs/${jobId}/evaluate`, {})
       toast.success('Evaluation queued — this may take a minute')
-    } catch {
-      toast.error('Failed to queue evaluation')
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 422) {
+        setEvalError(err.code as 'cv_missing' | 'job_content_missing')
+      } else {
+        toast.error('Failed to queue evaluation')
+      }
     } finally {
       setIsEvaluating(false)
     }
@@ -206,6 +212,26 @@ export default function JobDetailPage() {
           </a>
         )}
       </div>
+
+      {/* 422 evaluation error panels */}
+      {evalError === 'cv_missing' && (
+        <div className="border border-yellow-300 bg-yellow-50 rounded-lg p-4 text-sm text-yellow-800">
+          <p className="font-medium mb-1">CV needed</p>
+          <p>
+            Upload your CV first before evaluating jobs.{' '}
+            <Link href="/cv/ingest" className="underline font-medium">Add your CV</Link>
+          </p>
+        </div>
+      )}
+      {evalError === 'job_content_missing' && (
+        <div className="border border-yellow-300 bg-yellow-50 rounded-lg p-4 text-sm text-yellow-800">
+          <p className="font-medium mb-1">Job description unavailable</p>
+          <p>
+            This job has no readable description yet. Jobs ingested from ATS providers are
+            automatically populated; for manual entries, edit the job to add a description.
+          </p>
+        </div>
+      )}
 
       {/* Report blocks */}
       {report && (
