@@ -28,13 +28,14 @@ describe('handleGeneratePDF', () => {
     mockRenderPDF.mockResolvedValue(pdfBuffer)
     mockUploadBuffer.mockResolvedValue({ key: 'user-1/job-1/cv.pdf', etag: '"abc123"' })
 
-    // tenantQuery calls: fetch report, fetch job, fetch user CV, update applications
+    // tenantQuery calls: fetch report+score, fetch job, fetch user CV, update applications
     mockTenantQuery
       .mockResolvedValueOnce({
         rows: [{
           id: 'report-1',
           content_md: '## Block A\nScore: 4.5/5',
-          blocks_json: JSON.stringify({ blockA: { score: 4.5 } }),
+          blocks_json: JSON.stringify([{ label: 'Role Fit', content: 'Strong match for the role.' }]),
+          score: 4.5,
         }],
       })
       .mockResolvedValueOnce({
@@ -81,6 +82,34 @@ describe('handleGeneratePDF', () => {
       c => typeof c[1] === 'string' && c[1].toLowerCase().includes('pdf_path')
     )
     expect(updateCall).toBeDefined()
+
+    // score badge sourced from applications.score, not the (now scoreless) blocks_json array
+    expect(htmlArg).toContain('Score: 4.5/5')
+  })
+
+  it('omits the score badge when applications.score is NULL', async () => {
+    mockRenderPDF.mockResolvedValue(Buffer.from('pdf'))
+    mockUploadBuffer.mockResolvedValue({ key: 'user-s/job-s/cv.pdf' })
+
+    mockTenantQuery.mockResolvedValue({
+      rows: [{
+        id: 'x',
+        content_md: 'content',
+        blocks_json: JSON.stringify([{ label: 'Role Fit', content: 'text' }]),
+        score: null,
+        title: 'Eng',
+        company: 'Corp',
+        url: 'https://c.com/j',
+        cv_markdown: '# CV',
+        profile_json: '{}',
+      }],
+    })
+
+    const job = { data: { user_id: 'user-s', job_id: 'job-s', application_id: 'app-s' } }
+    await handleGeneratePDF(job)
+
+    const htmlArg = mockRenderPDF.mock.calls[0][0]
+    expect(htmlArg).not.toMatch(/<span class="score-badge">/)
   })
 
   it('uses correct R2 key format: {user_id}/{job_id}/cv.pdf', async () => {

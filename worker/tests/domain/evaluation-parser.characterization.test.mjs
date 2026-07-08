@@ -113,6 +113,20 @@ const FIXTURES = [
   ['malformed/no-headers response', MALFORMED_RESPONSE],
 ]
 
+// oracleBlocksToArray converts the oracle's legacy letter-keyed object
+// (`{blockA: {title, content, score}, ...}`) into the array shape
+// `EvaluationParser.parse` now produces: `[{label, content}]` sorted A→G,
+// per design decision 2 (evaluation-quality). Per-block `score` is dropped
+// (YAGNI — nothing consumes it); the overall `score` field is unaffected.
+const BLOCK_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G']
+
+function oracleBlocksToArray(oracleBlocks) {
+  return BLOCK_LETTERS.filter((letter) => oracleBlocks[`block${letter}`]).map((letter) => {
+    const { title, content } = oracleBlocks[`block${letter}`]
+    return { label: title, content }
+  })
+}
+
 describe('EvaluationParser characterization (oracle = current parseEvaluationResponse)', () => {
   describe('sanity: oracle is self-consistent', () => {
     it('full response — oracle extracts 7 blocks + overall score', () => {
@@ -128,14 +142,35 @@ describe('EvaluationParser characterization (oracle = current parseEvaluationRes
     })
   })
 
-  describe.each(FIXTURES)('fixture: %s', (_label, responseText) => {
-    it('EvaluationParser.parse matches the oracle exactly (blocks, score, contentMd)', () => {
+  describe.each([FIXTURES[0], FIXTURES[1]])('fixture: %s (successful parse)', (_label, responseText) => {
+    it('EvaluationParser.parse emits an A→G array of {label, content}, sorted, matching the oracle content', () => {
+      const golden = oracle(responseText)
+      const evaluation = EvaluationParser.parse(responseText)
+
+      expect(Array.isArray(evaluation.blocks)).toBe(true)
+      expect(evaluation.blocks).toEqual(oracleBlocksToArray(golden.blocks))
+      expect(evaluation.score).toEqual(golden.score)
+      expect(evaluation.contentMd).toEqual(golden.contentMd)
+    })
+
+    it('EvaluationParser.parse never throws', () => {
+      expect(() => EvaluationParser.parse(responseText)).not.toThrow()
+    })
+  })
+
+  describe.each([FIXTURES[2], FIXTURES[3]])('fixture: %s (parse error)', (_label, responseText) => {
+    it('EvaluationParser.parse keeps the parse_error sentinel object, array-safe for the web guard', () => {
       const golden = oracle(responseText)
       const evaluation = EvaluationParser.parse(responseText)
 
       expect(evaluation.blocks).toEqual(golden.blocks)
       expect(evaluation.score).toEqual(golden.score)
       expect(evaluation.contentMd).toEqual(golden.contentMd)
+
+      // "array-safe": the web client's `Array.isArray(blocks) && blocks.length > 0`
+      // guard must be false, not throw, for this shape (spec: LLM output
+      // fails to parse into blocks).
+      expect(Array.isArray(evaluation.blocks) && evaluation.blocks.length > 0).toBe(false)
     })
 
     it('EvaluationParser.parse never throws', () => {

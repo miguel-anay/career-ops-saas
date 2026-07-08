@@ -56,6 +56,10 @@ func (h *Handler) Evaluate(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "job not found", "not_found")
 		case errors.Is(err, ErrUsageLimitExceeded):
 			writeError(w, http.StatusPaymentRequired, err.Error(), "usage_limit_exceeded")
+		case errors.Is(err, ErrCVMissing):
+			writeError(w, http.StatusUnprocessableEntity, err.Error(), "cv_missing")
+		case errors.Is(err, ErrJobContentMissing):
+			writeError(w, http.StatusUnprocessableEntity, err.Error(), "job_content_missing")
 		default:
 			writeError(w, http.StatusInternalServerError, "failed to enqueue evaluation", "internal_error")
 		}

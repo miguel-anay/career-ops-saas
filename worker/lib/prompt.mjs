@@ -14,6 +14,22 @@
  * @param {object} db - DB interface with tenantQuery method
  * @returns {Promise<{system: Array, messages: Array}>}
  */
+/**
+ * Human-readable posting age ("posted N days ago") from a job's
+ * `received_at` timestamp, or null when unavailable (e.g. legacy rows
+ * ingested before this column was backfilled).
+ *
+ * @param {string | Date | null | undefined} receivedAt
+ * @returns {string | null}
+ */
+function describePostingAge(receivedAt) {
+  if (!receivedAt) return null
+  const receivedMs = new Date(receivedAt).getTime()
+  if (Number.isNaN(receivedMs)) return null
+  const days = Math.max(0, Math.floor((Date.now() - receivedMs) / (24 * 60 * 60 * 1000)))
+  return `posted ${days} day${days === 1 ? '' : 's'} ago`
+}
+
 export async function buildEvaluationPrompt(userId, jobId, db) {
   const { tenantQuery } = db
 
@@ -28,7 +44,7 @@ export async function buildEvaluationPrompt(userId, jobId, db) {
   // Fetch job data
   const jobResult = await tenantQuery(
     userId,
-    `SELECT scraped_content, title, company, url FROM jobs WHERE id = $1::uuid LIMIT 1`,
+    `SELECT scraped_content, title, company, url, received_at FROM jobs WHERE id = $1::uuid LIMIT 1`,
     [jobId]
   )
   const job = jobResult.rows[0] || {}
@@ -41,6 +57,7 @@ export async function buildEvaluationPrompt(userId, jobId, db) {
   const jobTitle = job.title || ''
   const jobCompany = job.company || ''
   const jobUrl = job.url || ''
+  const postingAge = describePostingAge(job.received_at)
 
   const staticSystemPrompt = `You are an expert career advisor and recruiter with 15+ years of experience evaluating job fits.
 
@@ -78,7 +95,12 @@ Tier: 1-5 (1 = Verified Direct, 5 = Suspicious/Ghost)
 
 End with: **Overall Score: X.X/5**
 
-Be honest, specific, and actionable. Reference actual details from the JD and CV.`
+Be honest, specific, and actionable. Reference actual details from the JD and CV.
+
+Additional guidance:
+- Map the candidate's relevant CV experience to STAR-format achievements (Situation, Task, Action, Result) the candidate could use in an interview for this role.
+- Include concrete negotiation guidance (e.g. target compensation range, leverage points) informed by the JD and the candidate's profile.
+- If a posting age is provided, factor it into Block G's legitimacy assessment (a very old, unrefreshed posting is a legitimacy signal).`
 
   const cvAndProfileBlock = `## Candidate Profile
 
@@ -95,7 +117,7 @@ ${profileJson}
 ### Job Details
 - **Title**: ${jobTitle}
 - **Company**: ${jobCompany}
-- **URL**: ${jobUrl}
+- **URL**: ${jobUrl}${postingAge ? `\n- **Posting age**: ${postingAge}` : ''}
 
 ### Job Description / Scraped Content
 ${scrapedContent || '(No scraped content available — evaluate from title and company only)'}

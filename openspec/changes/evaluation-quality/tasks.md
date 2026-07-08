@@ -26,21 +26,21 @@ Chain strategy: pending
 
 ## Phase 1: Go Content Guards (Unit 1)
 
-- [ ] T-252 RED: add `TestEnqueueEvaluation_CVMissing` + `TestEnqueueEvaluation_JobContentMissing` to `api/internal/evaluate/service_test.go` asserting `ErrCVMissing`/`ErrJobContentMissing` and zero enqueue calls (mock). Est. 40 lines.
-- [ ] T-253 GREEN: add `ErrCVMissing`, `ErrJobContentMissing` vars + `GetUserByID` call + guard order (CV first, then JD, `!x.Valid || strings.TrimSpace(x.String) == ""`) in `EnqueueEvaluation` (`api/internal/evaluate/service.go`). Est. 30 lines.
-- [ ] T-254 Handler mapping: extend the `switch` in `Evaluate` (`api/internal/evaluate/handler.go:54`) with `case errors.Is(err, ErrCVMissing)` → 422 `cv_missing`, `case errors.Is(err, ErrJobContentMissing)` → 422 `job_content_missing`. Est. 6 lines.
-- [ ] T-255 Regression check: run `cd api && go test ./internal/evaluate/... -v` and confirm existing `ErrNotFound`/`ErrUsageLimitExceeded` precedence tests still pass unchanged (spec: "Existing error precedence is preserved"). No new lines — verification task.
+- [x] T-252 RED: add `TestEnqueueEvaluation_CVMissing` + `TestEnqueueEvaluation_JobContentMissing` to `api/internal/evaluate/service_test.go` asserting `ErrCVMissing`/`ErrJobContentMissing` and zero enqueue calls (mock). Est. 40 lines.
+- [x] T-253 GREEN: add `ErrCVMissing`, `ErrJobContentMissing` vars + `GetUserByID` call + guard order (CV first, then JD, `!x.Valid || strings.TrimSpace(x.String) == ""`) in `EnqueueEvaluation` (`api/internal/evaluate/service.go`). Est. 30 lines.
+- [x] T-254 Handler mapping: extend the `switch` in `Evaluate` (`api/internal/evaluate/handler.go:54`) with `case errors.Is(err, ErrCVMissing)` → 422 `cv_missing`, `case errors.Is(err, ErrJobContentMissing)` → 422 `job_content_missing`. Est. 6 lines.
+- [x] T-255 Regression check: run `cd api && go test ./internal/evaluate/... -v` and confirm existing `ErrNotFound`/`ErrUsageLimitExceeded` precedence tests still pass unchanged (spec: "Existing error precedence is preserved"). No new lines — verification task.
 
 **Acceptance (T-252..T-255)**: `POST /api/jobs/{id}/evaluate` returns 422 `cv_missing` when `users.cv_markdown` empty, 422 `job_content_missing` when `jobs.scraped_content` empty, no `evaluate-job` enqueued in either case; 404/402 paths unchanged.
 
 ## Phase 2: Worker Parser + Prompt (Unit 2)
 
-- [ ] T-256 RED: update `worker/tests/domain/evaluation-parser.characterization.test.mjs` assertions from keyed-object blocks (`blockA.title`) to array shape (`blocks[0].label`, A→G order); add a case for `parseError` → array-safe (`[]`) fallback. Est. 25 lines changed.
-- [ ] T-257 GREEN: in `EvaluationParser.parse` (`worker/domain/EvaluationParser.mjs:31-60`), collect blocks into the existing letter-keyed map (parsing unchanged), then emit `Object.entries` sorted A→G as `[{label, content}]` before calling `Evaluation.fromBlocks`. Keep `score` capture only if Open Question resolves to keep it — default: drop per YAGNI, note in commit body. Est. 15 lines.
-- [ ] T-258 RED: update `worker/tests/adapters/pg-evaluation-repository.test.mjs` fixtures/assertions expecting `blocks_json` as an object to expect an array (build on the already-uncommitted re-eval upsert fix on `fix/42-pgboss-v10-batch` — do not duplicate those 5 `tenantQuery` assertions, only the shape assertion changes). Est. 15 lines changed.
-- [ ] T-259 GREEN: confirm `PgEvaluationRepository.save`'s `JSON.stringify(evaluation.blocks)` needs no code change (array flows through as-is) — run `cd worker && npx vitest run tests/adapters/pg-evaluation-repository.test.mjs` to confirm GREEN. Verification-only, no new lines.
-- [ ] T-260 Prompt enrichment: add `received_at` to the job `SELECT` in `worker/lib/prompt.mjs:31`, compute posting age (`now - received_at`, human-readable days), inject as a Block-G data point, add STAR-mapping + negotiation-guidance sentences to `staticSystemPrompt`. Est. 20 lines.
-- [ ] T-261 Test: add/update a `worker/tests/lib/prompt*.test.mjs` (or nearest existing prompt test) case asserting the age string and STAR/negotiation text appear, and that block count/field names stay 7×A-G. Est. 20 lines.
+- [x] T-256 RED: update `worker/tests/domain/evaluation-parser.characterization.test.mjs` assertions from keyed-object blocks (`blockA.title`) to array shape (`blocks[0].label`, A→G order); add a case for `parseError` → array-safe (`[]`) fallback. Est. 25 lines changed.
+- [x] T-257 GREEN: in `EvaluationParser.parse` (`worker/domain/EvaluationParser.mjs:31-60`), collect blocks into the existing letter-keyed map (parsing unchanged), then emit `Object.entries` sorted A→G as `[{label, content}]` before calling `Evaluation.fromBlocks`. Keep `score` capture only if Open Question resolves to keep it — default: drop per YAGNI, note in commit body. Est. 15 lines.
+- [x] T-258 RED: update `worker/tests/adapters/pg-evaluation-repository.test.mjs` fixtures/assertions expecting `blocks_json` as an object to expect an array (build on the already-uncommitted re-eval upsert fix on `fix/42-pgboss-v10-batch` — do not duplicate those 5 `tenantQuery` assertions, only the shape assertion changes). Est. 15 lines changed.
+- [x] T-259 GREEN: confirm `PgEvaluationRepository.save`'s `JSON.stringify(evaluation.blocks)` needs no code change (array flows through as-is) — run `cd worker && npx vitest run tests/adapters/pg-evaluation-repository.test.mjs` to confirm GREEN. Verification-only, no new lines.
+- [x] T-260 Prompt enrichment: add `received_at` to the job `SELECT` in `worker/lib/prompt.mjs:31`, compute posting age (`now - received_at`, human-readable days), inject as a Block-G data point, add STAR-mapping + negotiation-guidance sentences to `staticSystemPrompt`. Est. 20 lines.
+- [x] T-261 Test: add/update a `worker/tests/lib/prompt*.test.mjs` (or nearest existing prompt test) case asserting the age string and STAR/negotiation text appear, and that block count/field names stay 7×A-G. Est. 20 lines.
 
 **Acceptance (T-256..T-261)**: `cd worker && npm test` green; parser emits sorted A→G array; parseError path yields empty-array-safe blocks; prompt includes posting age + STAR/negotiation guidance; block schema unchanged.
 

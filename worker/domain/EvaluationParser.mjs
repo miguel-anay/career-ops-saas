@@ -13,9 +13,9 @@ import { Evaluation } from './Evaluation.mjs'
 const BLOCK_PATTERN =
   /##\s+Block\s+([A-G])\s*[—–-]\s*([^\n]+)([\s\S]*?)(?=##\s+Block\s+[A-G]|##\s+Overall|\*\*Overall Score|$)/gi
 
-const BLOCK_SCORE_PATTERN = /Score:\s*(\d+(?:\.\d+)?)\s*\/\s*5/i
-
 const OVERALL_SCORE_PATTERN = /\*\*Overall Score:\s*(\d+(?:\.\d+)?)\s*\/\s*5\*\*/i
+
+export const BLOCK_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G']
 
 export const EvaluationParser = {
   /**
@@ -28,7 +28,7 @@ export const EvaluationParser = {
     }
 
     try {
-      const blocks = {}
+      const blocksByLetter = {}
 
       let match
       // BLOCK_PATTERN carries the `g` flag and is a module-level constant —
@@ -36,23 +36,25 @@ export const EvaluationParser = {
       // don't skip matches based on a previous call's cursor position.
       BLOCK_PATTERN.lastIndex = 0
       while ((match = BLOCK_PATTERN.exec(responseText)) !== null) {
-        const blockKey = `block${match[1].toUpperCase()}`
+        const letter = match[1].toUpperCase()
         const blockTitle = match[2].trim()
         const blockContent = match[3].trim()
 
-        const scoreMatch = blockContent.match(BLOCK_SCORE_PATTERN)
-        const score = scoreMatch ? parseFloat(scoreMatch[1]) : null
-
-        blocks[blockKey] = {
-          title: blockTitle,
-          content: blockContent,
-          score,
-        }
+        // Per-block score is parsed but dropped from the emitted shape
+        // (YAGNI — no consumer reads it; the overall score below is kept).
+        blocksByLetter[letter] = { label: blockTitle, content: blockContent }
       }
 
-      if (Object.keys(blocks).length === 0) {
+      if (Object.keys(blocksByLetter).length === 0) {
         return Evaluation.parseError(responseText)
       }
+
+      // The LLM may emit blocks out of order; collect by letter above, then
+      // emit a fixed A→G array so the web client's collapsible sections
+      // render in a stable order regardless of model output order.
+      const blocks = BLOCK_LETTERS.filter((letter) => blocksByLetter[letter]).map(
+        (letter) => blocksByLetter[letter]
+      )
 
       const overallMatch = responseText.match(OVERALL_SCORE_PATTERN)
       const overallScore = overallMatch ? parseFloat(overallMatch[1]) : null

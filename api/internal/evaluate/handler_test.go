@@ -151,6 +151,58 @@ func TestEvaluate_UsageLimitExceeded(t *testing.T) {
 	svc.AssertExpectations(t)
 }
 
+func TestEvaluate_CVMissing(t *testing.T) {
+	svc := &MockService{}
+	h := evaluate.NewHandler(svc)
+
+	userID := uuid.New()
+	jobID := uuid.New()
+	svc.On("EnqueueEvaluation", mock.Anything, userID, jobID).Return("", evaluate.ErrCVMissing)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+jobID.String()+"/evaluate", nil)
+	ctx := newChiCtx(map[string]string{"id": jobID.String()})
+	ctx = middleware.SetUserID(ctx, userID)
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	h.Evaluate(rec, req)
+
+	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
+
+	var body map[string]string
+	err := json.NewDecoder(rec.Body).Decode(&body)
+	require.NoError(t, err)
+	assert.Equal(t, "cv_missing", body["code"])
+
+	svc.AssertExpectations(t)
+}
+
+func TestEvaluate_JobContentMissing(t *testing.T) {
+	svc := &MockService{}
+	h := evaluate.NewHandler(svc)
+
+	userID := uuid.New()
+	jobID := uuid.New()
+	svc.On("EnqueueEvaluation", mock.Anything, userID, jobID).Return("", evaluate.ErrJobContentMissing)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+jobID.String()+"/evaluate", nil)
+	ctx := newChiCtx(map[string]string{"id": jobID.String()})
+	ctx = middleware.SetUserID(ctx, userID)
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	h.Evaluate(rec, req)
+
+	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
+
+	var body map[string]string
+	err := json.NewDecoder(rec.Body).Decode(&body)
+	require.NoError(t, err)
+	assert.Equal(t, "job_content_missing", body["code"])
+
+	svc.AssertExpectations(t)
+}
+
 func TestEvaluate_ServiceError(t *testing.T) {
 	svc := &MockService{}
 	h := evaluate.NewHandler(svc)

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -20,6 +21,16 @@ var ErrNotFound = errors.New("not found")
 
 // ErrUsageLimitExceeded is returned when the user has reached their free plan limit.
 var ErrUsageLimitExceeded = errors.New("evaluation limit reached for free plan")
+
+// ErrCVMissing is returned when the requesting user has no CV on file
+// (users.cv_markdown is NULL or empty) — evaluation would burn LLM tokens
+// against nothing to compare, so it's rejected before enqueue.
+var ErrCVMissing = errors.New("cv missing")
+
+// ErrJobContentMissing is returned when the target job has no scraped job
+// description (jobs.scraped_content is NULL or empty), regardless of
+// ingestion source (manual, email, or ATS scan).
+var ErrJobContentMissing = errors.New("job content missing")
 
 const freePlanEvalLimit = 5
 
@@ -63,7 +74,21 @@ func (s *Service) EnqueueEvaluation(ctx context.Context, userID, jobID uuid.UUID
 			return ErrNotFound
 		}
 
-		// 2. Check usage limit for free plan.
+		// 2. Guard CV and job-content presence, in that order, BEFORE the
+		// usage-limit check and enqueue — both would otherwise waste an
+		// evaluation slot and LLM tokens on an evaluation that can't run.
+		user, err := q.GetUserByID(ctx, userID)
+		if err != nil {
+			return fmt.Errorf("get user: %w", err)
+		}
+		if isBlank(user.CvMarkdown) {
+			return ErrCVMissing
+		}
+		if isBlank(job.ScrapedContent) {
+			return ErrJobContentMissing
+		}
+
+		// 3. Check usage limit for free plan.
 		usage, err := q.GetUsageByUserMonth(ctx, db.GetUsageByUserMonthParams{
 			UserID: userID,
 			Month:  month,
@@ -79,16 +104,10 @@ func (s *Service) EnqueueEvaluation(ctx context.Context, userID, jobID uuid.UUID
 		return nil
 	})
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return "", ErrNotFound
-		}
-		if errors.Is(err, ErrUsageLimitExceeded) {
-			return "", ErrUsageLimitExceeded
-		}
 		return "", err
 	}
 
-	// 3. Enqueue evaluate-job (outside the tenant tx — pgboss.job has no RLS policy).
+	// 4. Enqueue evaluate-job (outside the tenant tx — pgboss.job has no RLS policy).
 	queueID := uuid.New()
 	payload, err := json.Marshal(evaluateJobPayload{
 		UserID: userID,
@@ -106,6 +125,12 @@ func (s *Service) EnqueueEvaluation(ctx context.Context, userID, jobID uuid.UUID
 	}
 
 	return queueID.String(), nil
+}
+
+// isBlank reports whether a nullable string column is NULL or contains only
+// whitespace.
+func isBlank(s sql.NullString) bool {
+	return !s.Valid || strings.TrimSpace(s.String) == ""
 }
 
 // GetReport returns the report for the user's job.
