@@ -36,7 +36,7 @@ if (!url) {
 // entry here = silent job loss: boss.createQueue must run (admin-side,
 // here) before the Go API's queue.Enqueue can route a job into that
 // queue's partition.
-export const QUEUE_NAMES = ['scan-company', 'evaluate-job', 'generate-pdf', 'ingest-cv', 'ingest-email']
+export const QUEUE_NAMES = ['scan-company', 'evaluate-job', 'generate-pdf', 'ingest-cv', 'ingest-email', 'fetch-job-content']
 
 async function renameOrphanedFakeTable(connectionString) {
   const client = new pg.Client({ connectionString })

@@ -11,6 +11,7 @@ import { handleEvaluateJob } from './jobs/evaluate.mjs'
 import { handleGeneratePDF } from './jobs/pdf.mjs'
 import { handleIngestCV } from './jobs/ingest-cv.mjs'
 import { handleIngestEmail } from './jobs/ingest-email.mjs'
+import { handleFetchJobContent } from './jobs/fetch-job-content.mjs'
 
 const PORT = process.env.WORKER_PORT || 3002
 
@@ -47,6 +48,11 @@ async function main() {
     teamSize: 5,
   })
   console.log('[worker] Registered handler: ingest-email')
+
+  await registerWorker('fetch-job-content', handleFetchJobContent, {
+    teamSize: 3, // Chromium-heavy, same as generate-pdf
+  })
+  console.log('[worker] Registered handler: fetch-job-content')
 
   // Express health endpoint
   const app = express()

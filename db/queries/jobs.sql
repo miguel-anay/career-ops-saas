@@ -56,3 +56,9 @@ INSERT INTO jobs (
       scraped_content = EXCLUDED.scraped_content,
       received_at     = EXCLUDED.received_at
 RETURNING *;
+
+-- name: UpdateJobScrapedContent :one
+UPDATE jobs
+SET scraped_content = $2
+WHERE id = $1
+RETURNING *;

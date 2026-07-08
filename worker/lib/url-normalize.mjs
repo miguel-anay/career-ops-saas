@@ -28,6 +28,16 @@ const HOST_RULES = {
   bumeran: /(^|\.)bumeran\.com(\.\w+)?$/i, // covers ccSLDs, e.g. bumeran.com.pe
 }
 
+/**
+ * Check if a hostname is in the SSRF allowlist.
+ * Used by fetch-job-content before navigating.
+ * @param {string} hostname
+ * @returns {boolean}
+ */
+export function isHostAllowed(hostname) {
+  return Object.values(HOST_RULES).some((re) => re.test(hostname))
+}
+
 const RULES = {
   linkedin(url) {
     const match = url.pathname.match(/\/jobs\/view\/(\d+)/)
