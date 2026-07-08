@@ -104,18 +104,6 @@ func (s *Service) EnqueueEvaluation(ctx context.Context, userID, jobID uuid.UUID
 		return nil
 	})
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return "", ErrNotFound
-		}
-		if errors.Is(err, ErrUsageLimitExceeded) {
-			return "", ErrUsageLimitExceeded
-		}
-		if errors.Is(err, ErrCVMissing) {
-			return "", ErrCVMissing
-		}
-		if errors.Is(err, ErrJobContentMissing) {
-			return "", ErrJobContentMissing
-		}
 		return "", err
 	}
 

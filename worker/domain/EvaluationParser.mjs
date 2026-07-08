@@ -13,11 +13,9 @@ import { Evaluation } from './Evaluation.mjs'
 const BLOCK_PATTERN =
   /##\s+Block\s+([A-G])\s*[—–-]\s*([^\n]+)([\s\S]*?)(?=##\s+Block\s+[A-G]|##\s+Overall|\*\*Overall Score|$)/gi
 
-const BLOCK_SCORE_PATTERN = /Score:\s*(\d+(?:\.\d+)?)\s*\/\s*5/i
-
 const OVERALL_SCORE_PATTERN = /\*\*Overall Score:\s*(\d+(?:\.\d+)?)\s*\/\s*5\*\*/i
 
-const BLOCK_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G']
+export const BLOCK_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G']
 
 export const EvaluationParser = {
   /**

@@ -9,12 +9,12 @@ import { uploadBuffer } from '../lib/r2.mjs'
  * @param {string} opts.cvMarkdown - User's CV in markdown
  * @param {string} opts.profileJson - User's profile as JSON string
  * @param {string} opts.reportContentMd - Evaluation report in markdown
- * @param {object} opts.blocksJson - Parsed evaluation blocks
+ * @param {number|null} opts.score - Overall evaluation score (applications.score)
  * @param {string} opts.jobTitle - Job title
  * @param {string} opts.company - Company name
  * @param {string} opts.jobUrl - Job URL
  */
-function buildCVHtml({ cvMarkdown, profileJson, reportContentMd, blocksJson, jobTitle, company, jobUrl }) {
+function buildCVHtml({ cvMarkdown, profileJson, reportContentMd, score, jobTitle, company, jobUrl }) {
   let profile = {}
   try {
     profile = typeof profileJson === 'string' ? JSON.parse(profileJson) : (profileJson || {})
@@ -23,12 +23,7 @@ function buildCVHtml({ cvMarkdown, profileJson, reportContentMd, blocksJson, job
   }
 
   const candidateName = profile.candidate?.full_name || profile.name || profile.full_name || 'Candidate'
-  const overallScore = blocksJson?.blockA?.score
-    ? Object.values(blocksJson)
-        .filter(b => typeof b === 'object' && b !== null && typeof b.score === 'number')
-        .reduce((acc, b, _, arr) => acc + b.score / arr.length, 0)
-        .toFixed(1)
-    : null
+  const overallScore = typeof score === 'number' ? score.toFixed(1) : null
 
   // Convert markdown to basic HTML (simple approach — production would use a proper parser)
   const cvHtml = cvMarkdown
@@ -133,10 +128,10 @@ function escapeHtml(str) {
  * Payload: { user_id, job_id, application_id }
  *
  * Flow:
- *   1. Fetch report (content_md, blocks_json)
+ *   1. Fetch report (content_md) joined with applications (score)
  *   2. Fetch job (title, company, url)
  *   3. Fetch user (cv_markdown, profile_json)
- *   4. Build HTML combining CV data + report blocks
+ *   4. Build HTML combining CV data + report content
  *   5. Call renderPDF(html) → Buffer
  *   6. Upload to R2 at key {user_id}/{job_id}/cv.pdf
  *   7. UPDATE applications.pdf_path with the R2 key
@@ -147,10 +142,12 @@ function escapeHtml(str) {
 export async function handleGeneratePDF(job) {
   const { user_id, job_id, application_id } = job.data
 
-  // Fetch report
+  // Fetch report, joined with applications for the overall score
   const reportResult = await tenantQuery(
     user_id,
-    `SELECT id, content_md, blocks_json FROM reports WHERE application_id = $1::uuid LIMIT 1`,
+    `SELECT r.id, r.content_md, a.score
+       FROM reports r JOIN applications a ON a.id = r.application_id
+      WHERE r.application_id = $1::uuid LIMIT 1`,
     [application_id]
   )
   const report = reportResult.rows[0] || {}
@@ -171,22 +168,12 @@ export async function handleGeneratePDF(job) {
   )
   const user = userResult.rows[0] || {}
 
-  // Parse blocks_json
-  let blocksJson = {}
-  try {
-    blocksJson = typeof report.blocks_json === 'string'
-      ? JSON.parse(report.blocks_json)
-      : (report.blocks_json || {})
-  } catch {
-    blocksJson = {}
-  }
-
   // Build HTML
   const htmlContent = buildCVHtml({
     cvMarkdown: user.cv_markdown || '',
     profileJson: user.profile_json || '{}',
     reportContentMd: report.content_md || '',
-    blocksJson,
+    score: report.score,
     jobTitle: jobData.title || '',
     company: jobData.company || '',
     jobUrl: jobData.url || '',
