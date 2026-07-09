@@ -57,7 +57,7 @@ Chain strategy: pending
 
 ## Phase 4: Cross-cutting Verification
 
-- [ ] T-266 Run `make test-all`; confirm Go/worker/web suites pass together and no other caller of `lib/api.ts`'s generic `Error` broke (callers ignoring `.code` still work per design Decision 4).
+- [x] T-266 Run `make test-all`; confirm Go/worker/web suites pass together and no other caller of `lib/api.ts`'s generic `Error` broke (callers ignoring `.code` still work per design Decision 4).
 
 ## Dependencies Between Slices
 
