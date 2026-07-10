@@ -97,6 +97,8 @@ End with: **Overall Score: X.X/5**
 
 Be honest, specific, and actionable. Reference actual details from the JD and CV.
 
+Write the FULL evaluation in Spanish (es-AR). Every block, score description, analysis, and summary must be in Spanish.
+
 Additional guidance:
 - Map the candidate's relevant CV experience to STAR-format achievements (Situation, Task, Action, Result) the candidate could use in an interview for this role.
 - Include concrete negotiation guidance (e.g. target compensation range, leverage points) informed by the JD and the candidate's profile.
