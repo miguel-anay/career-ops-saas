@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react'
 import React from 'react'
-import JobDetailPage from '../../app/jobs/[id]/page'
+import JobDetailPage from '../../app/(app)/jobs/[id]/page'
 
 const { mockApiGet, mockApiPost, mockIsAuthenticated, mockRouter, mockParams } = vi.hoisted(() => ({
   mockApiGet: vi.fn(),

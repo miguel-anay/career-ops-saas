@@ -1,18 +1,15 @@
 'use client'
 
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { postIngest, getIngestion, type IngestionStatus } from '@/features/cv/api'
-import { isAuthenticated } from '@/lib/auth'
 import { useJobProgress } from '@/features/cv/hooks'
 
 const POLL_INTERVAL_MS = 4000
 
 export default function IngestCVPage() {
-  const router = useRouter()
   const [rawCV, setRawCV] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [runId, setRunId] = useState<string | null>(null)
@@ -20,12 +17,6 @@ export default function IngestCVPage() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const { status, payload, isConnected, connect, reset } = useJobProgress()
-
-  useEffect(() => {
-    if (!isAuthenticated()) {
-      router.replace('/login')
-    }
-  }, [router])
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {

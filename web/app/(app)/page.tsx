@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -15,7 +14,6 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { apiGet, apiPatch } from '@/lib/api'
-import { isAuthenticated } from '@/lib/auth'
 
 interface Application {
   id: string
@@ -41,7 +39,6 @@ function formatDate(iso: string): string {
 }
 
 export default function TrackerPage() {
-  const router = useRouter()
   const [applications, setApplications] = useState<Application[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -63,12 +60,8 @@ export default function TrackerPage() {
   }, [])
 
   useEffect(() => {
-    if (!isAuthenticated()) {
-      router.replace('/login')
-      return
-    }
     loadApplications()
-  }, [loadApplications, router])
+  }, [loadApplications])
 
   const handleStatusChange = async (id: string, newStatus: string) => {
     try {
@@ -99,12 +92,7 @@ export default function TrackerPage() {
 
   return (
     <div className="container mx-auto p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Application Tracker</h1>
-        <Link href="/">
-          <Button variant="outline">← Pipeline</Button>
-        </Link>
-      </div>
+      <h1 className="text-2xl font-bold">Application Tracker</h1>
 
       <div className="rounded-md border overflow-x-auto">
         <Table>
