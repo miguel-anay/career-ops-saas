@@ -156,6 +156,43 @@ The rewritten `worker/tests/jobs/evaluate.test.mjs` MUST verify behavior by asse
 - WHEN run after the refactor is complete
 - THEN all tests pass, including the rewritten `worker/tests/jobs/evaluate.test.mjs` and the new `worker/tests/domain/*` suite
 
+### Requirement R1.2-Extended: `blocks_json` persisted as an array
+
+`PgEvaluationRepository.save` MUST persist `evaluation.blocks` such that `reports.blocks_json` is read back by the API and rendered by the web client as a JSON array of block objects (each with at least a `label` and content), not a plain object. (Previously: `blocks_json` was written as an object keyed by block letter, which the web client's `.map()` silently ignored via the `report.blocks_json.length > 0` guard, so the A-G collapsible UI never rendered.)
+
+#### Scenario: New evaluation persists array-shaped blocks
+
+- GIVEN a completed LLM evaluation with 7 parsed blocks (A-G)
+- WHEN `PgEvaluationRepository.save` writes the report
+- THEN `reports.blocks_json` is valid JSON array of length 7
+- AND each array element carries a block label resolvable by the web client
+
+#### Scenario: Re-evaluation replaces the prior report
+
+- GIVEN an application already has one `reports` row (from a prior evaluation)
+- WHEN the job is re-evaluated (e.g., after the user's CV is later ingested)
+- THEN the stale report row is deleted and a new one is inserted (per the existing DELETE-then-INSERT flow in `PgEvaluationRepository.save`)
+- AND `GetReportByApplicationID` (LIMIT 1, no ORDER BY) returns exactly the new array-shaped report, since only one row exists for the application
+
+#### Scenario: LLM output fails to parse into blocks
+
+- GIVEN the LLM response cannot be parsed into the 7-block structure
+- WHEN `PgEvaluationRepository.save` runs
+- THEN `blocks_json` is still persisted as a value the web client can safely check with `Array.isArray` / `.length` (e.g., an empty array), never a bare object
+- AND the report row is still written (`content_md` retains the raw/fallback text)
+
+### Requirement R1.3-Extended: Prompt includes posting-age signal and STAR/negotiation guidance
+
+`worker/lib/prompt.mjs` MUST include the job's `received_at` age (time since the job was ingested, in human-readable form) as a data point available to Block G, and MUST instruct the model to map CV experience to STAR-format achievements and to include negotiation guidance in its output. This is a prompt-text-only change: the A-G block schema and field names MUST remain unchanged.
+
+#### Scenario: Prompt built for a job with a known `received_at`
+
+- GIVEN a job row with a non-null `received_at` timestamp
+- WHEN `buildEvaluationPrompt` constructs the messages array
+- THEN the user-content message includes the posting age (e.g., "posted 5 days ago")
+- AND the system prompt instructs STAR-mapping and negotiation-guidance generation
+- AND the resulting prompt still requests exactly 7 blocks (A-G) with the same field names as before
+
 ## Architectural Shape
 
 The evaluate-job handler is implemented as:

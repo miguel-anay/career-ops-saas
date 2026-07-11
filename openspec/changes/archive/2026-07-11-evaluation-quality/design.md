@@ -116,5 +116,5 @@ commit. Likely two chained PRs (Go+worker, then web) to stay under 400 lines.
 
 ## Open Questions
 
-- [ ] Keep per-block `score` in the array shape, or drop it (web ignores it)?
-      Leaning drop (YAGNI) until a UI consumes it.
+- [x] Keep per-block `score` in the array shape, or drop it (web ignores it)?
+      Resolution: drop (YAGNI) — confirmed by verify-report, no regression.
