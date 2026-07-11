@@ -129,12 +129,6 @@ export function JobsDashboard() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Job Pipeline</h1>
         <div className="flex gap-2">
-          <Link href="/tracker">
-            <Button variant="outline">Tracker</Button>
-          </Link>
-          <Link href="/companies">
-            <Button variant="outline">Companies</Button>
-          </Link>
           <Button onClick={handleScanNow} disabled={isScanning}>
             {isScanning ? 'Scanning…' : 'Scan Now'}
           </Button>

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, waitFor, cleanup, fireEvent } from '@testing-library/react'
 import React from 'react'
-import TrackerPage from '../../app/tracker/page'
+import TrackerPage from '../../app/(app)/page'
 
 const { mockApiGet, mockApiPatch, mockRouter } = vi.hoisted(() => ({
   mockApiGet: vi.fn(),

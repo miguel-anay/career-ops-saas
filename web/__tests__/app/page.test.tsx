@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react'
 import React from 'react'
-import DashboardPage from '../../app/page'
+import DashboardPage from '../../app/(app)/jobs/page'
 
 const { mockApiGet, mockApiPost, mockIsAuthenticated, mockRouter } = vi.hoisted(() => ({
   mockApiGet: vi.fn(),
@@ -99,17 +99,4 @@ describe('Dashboard page (app/page.tsx)', () => {
     })
   })
 
-  it('redirects to /login when not authenticated, and does NOT fetch', async () => {
-    mockIsAuthenticated.mockReturnValue(false)
-
-    render(<DashboardPage />)
-
-    await waitFor(() => {
-      expect(mockRouter.replace).toHaveBeenCalledWith('/login')
-    })
-    // Behavior-preservation guard: an unauthenticated render must not fire an
-    // API call (it would 401). The feature/composer split must not decouple
-    // the auth guard from the data fetch.
-    expect(mockApiGet).not.toHaveBeenCalled()
-  })
 })

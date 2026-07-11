@@ -156,7 +156,7 @@ export default function JobDetailPage() {
   return (
     <div className="container mx-auto p-6 space-y-6 max-w-4xl">
       {/* Back */}
-      <Link href="/" className="text-sm text-muted-foreground hover:underline">
+      <Link href="/jobs" className="text-sm text-muted-foreground hover:underline">
         ← Back to pipeline
       </Link>
 

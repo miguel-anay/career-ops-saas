@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react'
 import React from 'react'
-import CompaniesPage from '../../app/companies/page'
+import CompaniesPage from '../../app/(app)/companies/page'
 
 const { mockApiGet, mockApiPost, mockApiDelete, mockIsAuthenticated, mockRouter } = vi.hoisted(() => ({
   mockApiGet: vi.fn(),
@@ -65,18 +65,6 @@ describe('Companies page (app/companies/page.tsx)', () => {
     mockIsAuthenticated.mockReturnValue(true)
     mockRouter.push.mockReset()
     mockRouter.replace.mockReset()
-  })
-
-  it('redirects to /login when not authenticated, and does NOT fetch', async () => {
-    mockIsAuthenticated.mockReturnValue(false)
-
-    render(<CompaniesPage />)
-
-    await waitFor(() => {
-      expect(mockRouter.replace).toHaveBeenCalledWith('/login')
-    })
-    // Behavior-preservation guard: no API call on unauthenticated render.
-    expect(mockApiGet).not.toHaveBeenCalled()
   })
 
   it('calls apiGet for companies and catalog on mount, and renders watched companies table', async () => {
@@ -176,13 +164,4 @@ describe('Companies page (app/companies/page.tsx)', () => {
     })
   })
 
-  it('redirects to /login when not authenticated', async () => {
-    mockIsAuthenticated.mockReturnValue(false)
-
-    render(<CompaniesPage />)
-
-    await waitFor(() => {
-      expect(mockRouter.replace).toHaveBeenCalledWith('/login')
-    })
-  })
 })

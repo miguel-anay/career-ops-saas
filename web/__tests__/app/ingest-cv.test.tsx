@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, waitFor, cleanup, fireEvent, act } from '@testing-library/react'
 import React from 'react'
-import IngestCVPage from '../../app/cv/ingest/page'
+import IngestCVPage from '../../app/(app)/cv/ingest/page'
 
 const { mockPostIngest, mockGetIngestion, mockRouter, mockConnect, mockReset, mockUseJobProgress } = vi.hoisted(() => ({
   mockPostIngest: vi.fn(),

@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
-import Link from 'next/link'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -100,12 +99,7 @@ export function CompaniesView() {
 
   return (
     <div className="container mx-auto p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Watched Companies</h1>
-        <Link href="/">
-          <Button variant="outline">← Pipeline</Button>
-        </Link>
-      </div>
+      <h1 className="text-2xl font-bold">Watched Companies</h1>
 
       {/* Add company from the global catalog */}
       <div className="relative max-w-xl">
