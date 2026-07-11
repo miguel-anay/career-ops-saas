@@ -1,5 +1,43 @@
 import { describe, it, expect } from 'vitest'
-import { normalizeJobUrl } from '../../lib/url-normalize.mjs'
+import { normalizeJobUrl, isHostAllowed } from '../../lib/url-normalize.mjs'
+
+// FU-2: direct coverage for isHostAllowed (the SSRF gate re-checked by
+// worker/jobs/fetch-job-content.mjs before Playwright navigates). Previously
+// only exercised indirectly via normalizeJobUrl's HOST_RULES checks.
+describe('isHostAllowed', () => {
+  const allowed = [
+    'linkedin.com',
+    'www.linkedin.com',
+    'indeed.com',
+    'www.indeed.com',
+    'pe.indeed.com',
+    'computrabajo.com',
+    'computrabajo.com.pe',
+    'www.computrabajo.com.pe',
+    'bumeran.com',
+    'bumeran.com.pe',
+    'www.bumeran.com.ar',
+  ]
+
+  it.each(allowed)('allows %s', (hostname) => {
+    expect(isHostAllowed(hostname)).toBe(true)
+  })
+
+  const rejected = [
+    'evil.com',
+    'tracking.evil-redirect.com',
+    'boards.greenhouse.io',
+    'jobs.lever.co',
+    'localhost',
+    '192.168.1.1',
+    'linkedin.com.evil.com', // suffix-spoofing attempt
+    '',
+  ]
+
+  it.each(rejected)('rejects %s', (hostname) => {
+    expect(isHostAllowed(hostname)).toBe(false)
+  })
+})
 
 describe('normalizeJobUrl', () => {
   const cases = [
