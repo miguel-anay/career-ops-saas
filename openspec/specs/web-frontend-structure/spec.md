@@ -135,6 +135,40 @@ The system MUST keep `cd web && npm test -- --run` green at the end of PR1 and a
 - WHEN `cd web && npm test -- --run` is run
 - THEN all tests pass, including any tests whose mock paths were updated for the move
 
+### Requirement: Job-detail page renders CV-missing and JD-unavailable states
+
+`web/app/jobs/[id]/page.tsx` MUST detect the `cv_missing` and `job_content_missing` 422 codes returned from `POST /api/jobs/{id}/evaluate` and render a distinct, actionable message for each, instead of a generic error. (Previously: no distinction existed; any evaluate failure showed the same generic error state.)
+
+#### Scenario: Evaluate fails with cv_missing
+
+- GIVEN the user clicks "Evaluate" on a job
+- WHEN the API responds 422 with code `cv_missing`
+- THEN the page shows a CV-missing message telling the user to add a CV
+- AND the message is structured so a future link to the CV page (issue #45) can be added without a UI rewrite
+
+#### Scenario: Evaluate fails with job_content_missing
+
+- GIVEN the user clicks "Evaluate" on a manually-added job with no scraped content
+- WHEN the API responds 422 with code `job_content_missing`
+- THEN the page shows a JD-unavailable message distinct from the CV-missing message
+
+### Requirement: Job-detail page renders array-shaped `blocks_json`
+
+The report-rendering section of `web/app/jobs/[id]/page.tsx` MUST continue to treat `report.blocks_json` as an array (`Array.isArray(report.blocks_json) && report.blocks_json.length > 0`) and MUST render each block as a collapsible section, now actually receiving array data end-to-end from the fixed repository write.
+
+#### Scenario: Report with 7 array blocks renders
+
+- GIVEN a report whose `blocks_json` is a 7-element array
+- WHEN the job-detail page loads the report
+- THEN 7 collapsible sections render, one per block, labeled A-G
+
+#### Scenario: Backward-compat — pre-existing object-shaped `blocks_json` row
+
+- GIVEN a `reports` row written before this change, where `blocks_json` is a plain object (not an array)
+- WHEN the job-detail page loads that report
+- THEN the page does not throw (guarded by the `Array.isArray` check) and instead renders no blocks
+- AND re-evaluating that job (see worker-evaluate-job re-evaluation scenario) produces a new array-shaped row that then renders correctly
+
 ## History
 
 - **Created**: 2026-06-25 — SDD archive phase for web-feature-folders change

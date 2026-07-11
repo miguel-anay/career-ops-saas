@@ -92,7 +92,7 @@ The two enqueue sites gate differently:
 **Rationale**: The worker gate is the true trust boundary because it is the
 last check before navigation and it does not trust that every enqueue path
 pre-filtered. Given that gate exists, `ingest-email` needs no duplicate
-enqueue-side check, while `AddManual` keeps its check to avoid enqueuing
+enqueue-side check, while `AddManual` keeps its check to avoid enqueueing
 provably-dead work. End state is equivalent — Playwright never navigates to a
 disallowed host on either path — but the gate lives in different places per
 path. Recorded as a decided fact, not a discrepancy to fix.

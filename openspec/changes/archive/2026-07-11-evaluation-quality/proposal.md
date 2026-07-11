@@ -63,8 +63,8 @@ Revert per-PR: the Go guard, the repo one-liner, and prompt text are independent
 
 ## Success Criteria
 
-- [ ] Evaluating a job with no CV returns 422 with an actionable message and burns 0 tokens.
-- [ ] Evaluating a manual/email job with NULL `scraped_content` returns 422 (JD unavailable), 0 tokens.
-- [ ] A-G collapsible blocks actually render on the job-detail page.
-- [ ] Prompt includes posting-age + STAR/negotiation guidance; A-G schema unchanged.
+- [x] Evaluating a job with no CV returns 422 with an actionable message and burns 0 tokens.
+- [x] Evaluating a manual/email job with NULL `scraped_content` returns 422 (JD unavailable), 0 tokens.
+- [x] A-G collapsible blocks actually render on the job-detail page.
+- [x] Prompt includes posting-age + STAR/negotiation guidance; A-G schema unchanged.
 - [ ] (Future `job-content-fetch`) a Bumeran job added by URL gets its JD within N minutes, then evaluates without a 422.

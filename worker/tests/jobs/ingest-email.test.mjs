@@ -12,10 +12,15 @@ const mockDecodeMessage = vi.fn()
 
 const mockFindParserForSender = vi.fn()
 const mockAllSenders = vi.fn()
+const mockBossSend = vi.fn()
 
 vi.mock('../../lib/db.mjs', () => ({
   tenantQuery: mockTenantQuery,
   pool: mockPool,
+}))
+
+vi.mock('../../lib/queue.mjs', () => ({
+  default: { send: mockBossSend },
 }))
 
 vi.mock('../../lib/progress.mjs', () => ({
@@ -46,6 +51,7 @@ describe('handleIngestEmail', () => {
     mockPool.connect.mockResolvedValue(mockPoolClient)
     mockNotify.mockResolvedValue(undefined)
     mockAllSenders.mockReturnValue(['jobalerts-noreply@linkedin.com', 'alert@indeed.com'])
+    mockBossSend.mockResolvedValue(undefined)
   })
 
   it('null refresh token: marks run error, notifies, and makes no Gmail calls', async () => {
@@ -165,5 +171,64 @@ describe('handleIngestEmail', () => {
 
     const statusUpdateCall = mockTenantQuery.mock.calls.find((c) => c[1].includes('SET status'))
     expect(statusUpdateCall[2]).toContain('completed')
+  })
+
+  // FU-3: fetch-job-content enqueue coverage for the new-job path.
+  describe('fetch-job-content enqueue', () => {
+    function stubSingleNewJob() {
+      mockTenantQuery
+        .mockResolvedValueOnce({ rows: [{ google_refresh_token: 'stored-refresh-token' }] }) // SELECT
+        .mockResolvedValueOnce({ rows: [{ id: 'job-1', is_new: true }] }) // upsert -> new
+        .mockResolvedValueOnce({ rows: [] }) // status update
+
+      mockGetAccessToken.mockResolvedValue('access-token')
+      mockListMessages.mockResolvedValue([{ id: 'm1' }])
+      mockGetMessage.mockResolvedValue({ id: 'm1' })
+      mockDecodeMessage.mockReturnValue({ from: 'alert@indeed.com', subject: 'jobs', html: '', text: '' })
+      mockFindParserForSender.mockReturnValue({
+        id: 'indeed',
+        parse: () => [{ title: 'Job X', company: 'Co X', url: 'https://www.indeed.com/rc/clk?jk=abc' }],
+      })
+    }
+
+    it('enqueues fetch-job-content for a newly-inserted job', async () => {
+      stubSingleNewJob()
+
+      await handleIngestEmail(baseJob())
+
+      expect(mockBossSend).toHaveBeenCalledTimes(1)
+      expect(mockBossSend).toHaveBeenCalledWith('fetch-job-content', { user_id: 'user-1', job_id: 'job-1' })
+    })
+
+    it('does not enqueue fetch-job-content for a duplicate job (is_new false / zero rows)', async () => {
+      mockTenantQuery
+        .mockResolvedValueOnce({ rows: [{ google_refresh_token: 'stored-refresh-token' }] }) // SELECT
+        .mockResolvedValueOnce({ rows: [] }) // upsert -> duplicate (ON CONFLICT DO NOTHING)
+        .mockResolvedValueOnce({ rows: [] }) // status update
+
+      mockGetAccessToken.mockResolvedValue('access-token')
+      mockListMessages.mockResolvedValue([{ id: 'm1' }])
+      mockGetMessage.mockResolvedValue({ id: 'm1' })
+      mockDecodeMessage.mockReturnValue({ from: 'alert@indeed.com', subject: 'jobs', html: '', text: '' })
+      mockFindParserForSender.mockReturnValue({
+        id: 'indeed',
+        parse: () => [{ title: 'Job X', company: 'Co X', url: 'https://www.indeed.com/rc/clk?jk=abc' }],
+      })
+
+      await handleIngestEmail(baseJob())
+
+      expect(mockBossSend).not.toHaveBeenCalled()
+    })
+
+    it('boss.send throwing is caught and logged — the ingest run still completes', async () => {
+      stubSingleNewJob()
+      mockBossSend.mockRejectedValue(new Error('queue not registered'))
+
+      await expect(handleIngestEmail(baseJob())).resolves.not.toThrow()
+
+      expect(mockBossSend).toHaveBeenCalledTimes(1)
+      const statusUpdateCall = mockTenantQuery.mock.calls.find((c) => c[1].includes('SET status'))
+      expect(statusUpdateCall[2]).toContain('completed')
+    })
   })
 })
