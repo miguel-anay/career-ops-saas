@@ -78,22 +78,44 @@ export async function handleIngestCV(job) {
   const client = await pool.connect()
 
   try {
-    await tenantQuery(
-      user_id,
-      `UPDATE cv_ingestions SET status = 'processing' WHERE id = $1::uuid`,
-      [run_id]
-    )
-
-    const existingResult = await tenantQuery(
-      user_id,
-      `SELECT cv_markdown, profile_json FROM users WHERE id = $1::uuid`,
-      [user_id]
-    )
-    const existingCv = existingResult.rows[0]?.cv_markdown || ''
+    // Independent operations (different tables, neither depends on the
+    // other's result) — run concurrently rather than adding a serialized
+    // round trip before the Anthropic call even starts.
+    const [, existingResult] = await Promise.all([
+      tenantQuery(
+        user_id,
+        `UPDATE cv_ingestions SET status = 'processing' WHERE id = $1::uuid`,
+        [run_id]
+      ),
+      tenantQuery(
+        user_id,
+        `SELECT cv_markdown, profile_json FROM users WHERE id = $1::uuid`,
+        [user_id]
+      ),
+    ])
+    const rawExistingCv = existingResult.rows[0]?.cv_markdown || ''
     const existingProfile = existingResult.rows[0]?.profile_json || {}
+
+    // Only treat existing data as merge-worthy if it isn't itself the
+    // product of a prior parse failure — otherwise a garbled raw-text blob
+    // from a previously failed ingest would be handed to Claude as
+    // "authoritative existing CV" and preserved forever by the merge prompt.
+    const hadGoodProfile =
+      existingProfile && !existingProfile.parse_error && Object.keys(existingProfile).length > 0
+    const hadGoodCv = rawExistingCv.trim().length > 0 && !existingProfile.parse_error
+    const existingCv = hadGoodCv ? rawExistingCv : ''
 
     const useAnthropic = (process.env.EVALUATOR || 'anthropic') === 'anthropic'
     const ingestCV = useAnthropic ? anthropicIngestCV : openaiCompatIngestCV
+
+    const markFailed = async (errorMessage) => {
+      await tenantQuery(
+        user_id,
+        `UPDATE cv_ingestions SET status = 'failed', finished_at = NOW() WHERE id = $1::uuid`,
+        [run_id]
+      )
+      await notify(client, run_id, 'ingest.failed', { error: errorMessage })
+    }
 
     try {
       const prompt = buildIngestPrompt(raw_cv, existingCv)
@@ -105,20 +127,15 @@ export async function handleIngestCV(job) {
       // Sanity guard (D2): a parse-error response must never overwrite a
       // good existing profile/CV. If there is nothing valuable to protect
       // (first ingest, or an empty prior profile), fall through as before.
-      const parseErrored = profileJson.parse_error === true
-      const hadGoodProfile =
-        existingProfile && !existingProfile.parse_error && Object.keys(existingProfile).length > 0
-      const hadGoodCv = existingCv.trim().length > 0
+      // A non-object profileJson (e.g. Claude's JSON fence literally
+      // contained `null`) is treated as errored too, not just the explicit
+      // parse_error flag — otherwise it would silently overwrite good data
+      // with a null profile instead of preserving it.
+      const parseErrored =
+        !profileJson || typeof profileJson !== 'object' || profileJson.parse_error === true
 
       if (parseErrored && (hadGoodProfile || hadGoodCv)) {
-        await tenantQuery(
-          user_id,
-          `UPDATE cv_ingestions SET status = 'failed', finished_at = NOW() WHERE id = $1::uuid`,
-          [run_id]
-        )
-        await notify(client, run_id, 'ingest.failed', {
-          error: 'parse_error_preserved_existing',
-        })
+        await markFailed('parse_error_preserved_existing')
         return
       }
 
@@ -135,18 +152,10 @@ export async function handleIngestCV(job) {
       )
 
       await notify(client, run_id, 'ingest.completed', {
-        parse_error: !!profileJson.parse_error,
+        parse_error: !!profileJson?.parse_error,
       })
     } catch (err) {
-      await tenantQuery(
-        user_id,
-        `UPDATE cv_ingestions SET status = 'failed', finished_at = NOW() WHERE id = $1::uuid`,
-        [run_id]
-      )
-
-      await notify(client, run_id, 'ingest.failed', {
-        error: err?.message || 'unknown error',
-      })
+      await markFailed(err?.message || 'unknown error')
     }
   } finally {
     client.release()

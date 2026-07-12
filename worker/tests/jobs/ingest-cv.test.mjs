@@ -372,4 +372,59 @@ describe('handleIngestCV', () => {
 
     expect(processingCalledBeforeAnthropic).toBe(true)
   })
+
+  it('does not treat a prior parse-error blob as merge-worthy existing CV', async () => {
+    // Previous ingest failed with nothing to protect (first ingest), so the
+    // raw garbled text got written to cv_markdown with profile_json marked
+    // parse_error:true. This ingest must NOT hand that garbage to Claude as
+    // "existing CV to preserve" — it should behave like a first ingest.
+    mockTenantQuery
+      .mockResolvedValueOnce({ rows: [] }) // 1. processing transition
+      .mockResolvedValueOnce({
+        rows: [{ cv_markdown: 'garbled raw text from a failed ingest', profile_json: { parse_error: true } }],
+      }) // 2. pre-read: existing data is itself bad
+      .mockResolvedValue({ rows: [] })
+
+    mockBuildIngestPrompt.mockReturnValue({ system: [], messages: [{ role: 'user', content: 'x' }] })
+    mockIngestCV.mockResolvedValue({ content: [{ type: 'text', text: validResponseText }] })
+
+    const job = { data: { user_id: 'user-9', run_id: 'run-9', raw_cv: 'fresh CV text' } }
+    await handleIngestCV(job)
+
+    expect(mockBuildIngestPrompt).toHaveBeenCalledWith('fresh CV text', '')
+  })
+
+  it('treats a non-object profileJson (Claude emits literal null) as a parse error, never crashes', async () => {
+    const literalNullResponse = `===CV_MARKDOWN===
+Some CV text
+===PROFILE_JSON===
+\`\`\`json
+null
+\`\`\``
+
+    mockTenantQuery
+      .mockResolvedValueOnce({ rows: [] }) // 1. processing transition
+      .mockResolvedValueOnce({
+        rows: [{ cv_markdown: 'existing good CV', profile_json: { candidate: { full_name: 'Jane' } } }],
+      }) // 2. pre-read: good existing profile to protect
+      .mockResolvedValue({ rows: [] })
+
+    mockBuildIngestPrompt.mockReturnValue({ system: [], messages: [{ role: 'user', content: 'x' }] })
+    mockIngestCV.mockResolvedValue({ content: [{ type: 'text', text: literalNullResponse }] })
+
+    const job = { data: { user_id: 'user-10', run_id: 'run-10', raw_cv: 'x' } }
+
+    await expect(handleIngestCV(job)).resolves.not.toThrow()
+
+    // Good existing profile must be preserved, not overwritten with null.
+    const usersUpdateCall = mockTenantQuery.mock.calls.find(
+      c => typeof c[1] === 'string' && c[1].toLowerCase().includes('update users')
+    )
+    expect(usersUpdateCall).toBeUndefined()
+
+    const [, notifiedRunId, notifiedEvent, notifiedData] = mockNotify.mock.calls[0]
+    expect(notifiedRunId).toBe('run-10')
+    expect(notifiedEvent).toBe('ingest.failed')
+    expect(notifiedData).toEqual({ error: 'parse_error_preserved_existing' })
+  })
 })

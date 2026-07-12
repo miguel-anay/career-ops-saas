@@ -5,6 +5,21 @@
  * sections in a fixed order so the regex split in `parseIngestResponse`
  * (worker/jobs/ingest-cv.mjs) is deterministic.
  */
+// Shared PROFILE_JSON schema + output-format contract, reused by both prompt
+// variants below so the shape only needs to change in one place.
+const PROFILE_JSON_BLOCK = `===PROFILE_JSON===
+\`\`\`json
+{ "candidate": { "full_name": "...", "email": "...", "phone": "...", "location": "...",
+    "linkedin": "...", "github": "...", "portfolio_url": "..." },
+  "target_roles": { "primary": ["..."], "archetypes": [{ "name": "...", "level": "...", "fit": "..." }] },
+  "salary_target": { "min": 0, "max": 0, "currency": "..." },
+  "narrative": "..." }
+\`\`\``
+
+const COMMON_RULES = `- Output the markers VERBATIM, in order: ===CV_MARKDOWN=== then ===PROFILE_JSON===.
+- profile_json MUST be valid JSON inside a \`\`\`json fence.
+- Use null/empty for unknown fields; never fabricate contact info or salary.`
+
 export const INGEST_SYSTEM_PROMPT = `You are a CV ingestion assistant. Given a candidate's raw CV text, produce TWO sections
 in this EXACT format and nothing else:
 
@@ -12,19 +27,10 @@ in this EXACT format and nothing else:
 <the CV reformatted as clean, well-structured markdown — headings, bullet lists,
 preserve all factual content, do not invent>
 
-===PROFILE_JSON===
-\`\`\`json
-{ "candidate": { "full_name": "...", "email": "...", "phone": "...", "location": "...",
-    "linkedin": "...", "github": "...", "portfolio_url": "..." },
-  "target_roles": { "primary": ["..."], "archetypes": [{ "name": "...", "level": "...", "fit": "..." }] },
-  "salary_target": { "min": 0, "max": 0, "currency": "..." },
-  "narrative": "..." }
-\`\`\`
+${PROFILE_JSON_BLOCK}
 
 Rules:
-- Output the markers VERBATIM, in order: ===CV_MARKDOWN=== then ===PROFILE_JSON===.
-- profile_json MUST be valid JSON inside a \`\`\`json fence.
-- Use null/empty for unknown fields; never fabricate contact info or salary.
+${COMMON_RULES}
 - candidate.full_name is REQUIRED if present anywhere in the CV.`
 
 /**
@@ -60,19 +66,10 @@ Then produce the two delimited sections in this EXACT format and nothing else:
 ===CV_MARKDOWN===
 <the merged, comprehensive CV as clean markdown>
 
-===PROFILE_JSON===
-\`\`\`json
-{ "candidate": { "full_name": "...", "email": "...", "phone": "...", "location": "...",
-    "linkedin": "...", "github": "...", "portfolio_url": "..." },
-  "target_roles": { "primary": ["..."], "archetypes": [{ "name": "...", "level": "...", "fit": "..." }] },
-  "salary_target": { "min": 0, "max": 0, "currency": "..." },
-  "narrative": "..." }
-\`\`\`
+${PROFILE_JSON_BLOCK}
 
 Rules:
-- Output the markers VERBATIM, in order: ===CV_MARKDOWN=== then ===PROFILE_JSON===.
-- profile_json MUST be valid JSON inside a \`\`\`json fence.
-- Use null/empty for unknown fields; never fabricate contact info or salary.
+${COMMON_RULES}
 - The merged CV must be a superset: it may never be shorter in factual coverage
   than the existing CV.`
 
