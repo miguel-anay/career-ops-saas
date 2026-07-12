@@ -256,6 +256,18 @@ type Job struct {
 	CreatedAt      time.Time             `json:"created_at"`
 }
 
+type ProfileEdit struct {
+	ID         uuid.UUID             `json:"id"`
+	UserID     uuid.UUID             `json:"user_id"`
+	FieldPath  string                `json:"field_path"`
+	OldValue   pqtype.NullRawMessage `json:"old_value"`
+	NewValue   pqtype.NullRawMessage `json:"new_value"`
+	Source     string                `json:"source"`
+	Status     string                `json:"status"`
+	CreatedAt  time.Time             `json:"created_at"`
+	ResolvedAt sql.NullTime          `json:"resolved_at"`
+}
+
 type Report struct {
 	ID            uuid.UUID       `json:"id"`
 	UserID        uuid.UUID       `json:"user_id"`
@@ -291,6 +303,7 @@ type User struct {
 	Plan               PlanT           `json:"plan"`
 	CvMarkdown         sql.NullString  `json:"cv_markdown"`
 	ProfileJson        json.RawMessage `json:"profile_json"`
+	ProfileOverrides   json.RawMessage `json:"profile_overrides"`
 	CreatedAt          time.Time       `json:"created_at"`
 	GoogleRefreshToken sql.NullString  `json:"google_refresh_token"`
 }

@@ -36,6 +36,9 @@ CREATE TABLE users (
   plan                plan_t      NOT NULL DEFAULT 'free',
   cv_markdown         text,
   profile_json        jsonb       NOT NULL DEFAULT '{}'::jsonb,
+  -- Manually-confirmed top-level overrides (profile-persistence). Never
+  -- written by ingestion; shallow-merged over profile_json at read time.
+  profile_overrides   jsonb       NOT NULL DEFAULT '{}'::jsonb,
   created_at          timestamptz NOT NULL DEFAULT now(),
   -- Gmail incremental-consent refresh token (gmail-job-ingestion). Nullable:
   -- existing users have none until they connect Gmail.
@@ -180,3 +183,21 @@ CREATE TABLE email_ingest_runs (
   finished_at timestamptz
 );
 CREATE INDEX idx_email_ingest_runs_user ON email_ingest_runs(user_id, started_at DESC);
+
+-- profile_edits (profile-persistence): ledger of every manual/AI-suggested
+-- edit to a user's profile_overrides. Generic across source/status so a
+-- future "ai_suggestion"/"proposed" row needs no schema change.
+CREATE TABLE profile_edits (
+  id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     uuid        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  field_path  text        NOT NULL,
+  old_value   jsonb,
+  new_value   jsonb,
+  source      text        NOT NULL DEFAULT 'manual'
+                            CHECK (source IN ('manual','ai_suggestion')),
+  status      text        NOT NULL DEFAULT 'accepted'
+                            CHECK (status IN ('accepted','proposed','undone')),
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  resolved_at timestamptz
+);
+CREATE INDEX idx_profile_edits_user ON profile_edits(user_id, created_at DESC);
