@@ -48,20 +48,27 @@ export function parseIngestResponse(responseText) {
  *
  * Flow:
  *   1. Transition the cv_ingestions row to 'processing' before calling Claude
- *   2. Build the ingest prompt and call Claude exactly once
- *   3. Parse the response with the never-throw guard
- *   4. tenantQuery UPDATE users (cv_markdown, profile_json)
- *   5. tenantQuery UPDATE cv_ingestions (status, finished_at)
- *   6. notify(client, run_id, 'ingest.completed' | 'ingest.failed', {...})
+ *   2. Pre-read the existing cv_markdown/profile_json (merge-on-ingest, D1)
+ *   3. Build the ingest prompt (merge variant if an existing CV exists) and
+ *      call Claude exactly once
+ *   4. Parse the response with the never-throw guard
+ *   5. Sanity guard (D2): skip the destructive UPDATE if Claude returned a
+ *      parse error over an already-good profile/CV
+ *   6. tenantQuery UPDATE users (cv_markdown, profile_json)
+ *   7. tenantQuery UPDATE cv_ingestions (status, finished_at)
+ *   8. notify(client, run_id, 'ingest.completed' | 'ingest.failed', {...})
  *
  * NOTE: usage.ingestions_count is NOT incremented here. It is metered at
  * enqueue time in the Go API (cv.Service.EnqueueIngest, Seam B) — bumping
  * it again in the worker would double-count the same ingestion.
  *
- * On a parse miss, the row still ends in 'completed' (raw markdown
- * persisted, profile_json = {parse_error:true}); only a thrown Anthropic
- * call (network/API error) drives the row to 'failed'. Either way the row
- * never stays stuck in pending/processing.
+ * On a parse miss over an empty/absent prior profile, the row still ends in
+ * 'completed' (raw markdown persisted, profile_json = {parse_error:true}) —
+ * nothing valuable to protect. On a parse miss over a GOOD prior profile,
+ * the sanity guard skips the write entirely and the row ends in 'failed'
+ * instead, preserving the existing cv_markdown/profile_json untouched. A
+ * thrown Anthropic call (network/API error) also drives the row to
+ * 'failed'. Either way the row never stays stuck in pending/processing.
  *
  * @param {object} job - pg-boss job object
  * @param {object} job.data - Job payload
@@ -77,15 +84,43 @@ export async function handleIngestCV(job) {
       [run_id]
     )
 
+    const existingResult = await tenantQuery(
+      user_id,
+      `SELECT cv_markdown, profile_json FROM users WHERE id = $1::uuid`,
+      [user_id]
+    )
+    const existingCv = existingResult.rows[0]?.cv_markdown || ''
+    const existingProfile = existingResult.rows[0]?.profile_json || {}
+
     const useAnthropic = (process.env.EVALUATOR || 'anthropic') === 'anthropic'
     const ingestCV = useAnthropic ? anthropicIngestCV : openaiCompatIngestCV
 
     try {
-      const prompt = buildIngestPrompt(raw_cv)
+      const prompt = buildIngestPrompt(raw_cv, existingCv)
       const response = await ingestCV(prompt.system, prompt.messages[0].content)
       const responseText = response.content?.[0]?.text || ''
 
       const { cvMarkdown, profileJson } = parseIngestResponse(responseText)
+
+      // Sanity guard (D2): a parse-error response must never overwrite a
+      // good existing profile/CV. If there is nothing valuable to protect
+      // (first ingest, or an empty prior profile), fall through as before.
+      const parseErrored = profileJson.parse_error === true
+      const hadGoodProfile =
+        existingProfile && !existingProfile.parse_error && Object.keys(existingProfile).length > 0
+      const hadGoodCv = existingCv.trim().length > 0
+
+      if (parseErrored && (hadGoodProfile || hadGoodCv)) {
+        await tenantQuery(
+          user_id,
+          `UPDATE cv_ingestions SET status = 'failed', finished_at = NOW() WHERE id = $1::uuid`,
+          [run_id]
+        )
+        await notify(client, run_id, 'ingest.failed', {
+          error: 'parse_error_preserved_existing',
+        })
+        return
+      }
 
       await tenantQuery(
         user_id,

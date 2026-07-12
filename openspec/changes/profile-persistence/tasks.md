@@ -44,10 +44,10 @@ Chain strategy: stacked-to-main
 
 ## Phase 3: Worker — CV Merge-on-Ingest (Unit 1)
 
-- [ ] T-274 RED — `worker/tests/lib/ingest-prompt.test.mjs`: test `buildIngestPrompt(rawCV, existingCvMarkdown)` — when `existingCvMarkdown` is non-empty, returns the `INGEST_MERGE_SYSTEM_PROMPT` system block and a user message containing both the existing CV and new text labeled distinctly; when empty, behaves exactly as today (`INGEST_SYSTEM_PROMPT`, raw-only user message).
-- [ ] T-275 GREEN — `worker/lib/ingest-prompt.mjs`: add `INGEST_MERGE_SYSTEM_PROMPT` (exact text per design D1) and change `buildIngestPrompt` signature to `(rawCV, existingCvMarkdown)`, branching on presence.
-- [ ] T-276 RED — `worker/tests/jobs/ingest-cv.test.mjs`: (a) merge case — pre-existing `cv_markdown`/`profile_json` are read and passed into `buildIngestPrompt`; (b) parse-error over a good profile skips the `UPDATE users`, marks `cv_ingestions` `failed`, calls `notify(..., 'ingest.failed', {error: 'parse_error_preserved_existing'})`; (c) parse-error over an empty/absent prior profile still performs the `UPDATE` (today's first-ingest behavior unchanged).
-- [ ] T-277 GREEN — `worker/jobs/ingest-cv.mjs`: pre-read `cv_markdown, profile_json` via `tenantQuery` before building the prompt; add the D2 sanity guard immediately before `UPDATE users`.
+- [x] T-274 RED — `worker/tests/lib/ingest-prompt.test.mjs`: test `buildIngestPrompt(rawCV, existingCvMarkdown)` — when `existingCvMarkdown` is non-empty, returns the `INGEST_MERGE_SYSTEM_PROMPT` system block and a user message containing both the existing CV and new text labeled distinctly; when empty, behaves exactly as today (`INGEST_SYSTEM_PROMPT`, raw-only user message).
+- [x] T-275 GREEN — `worker/lib/ingest-prompt.mjs`: add `INGEST_MERGE_SYSTEM_PROMPT` (exact text per design D1) and change `buildIngestPrompt` signature to `(rawCV, existingCvMarkdown)`, branching on presence.
+- [x] T-276 RED — `worker/tests/jobs/ingest-cv.test.mjs`: (a) merge case — pre-existing `cv_markdown`/`profile_json` are read and passed into `buildIngestPrompt`; (b) parse-error over a good profile skips the `UPDATE users`, marks `cv_ingestions` `failed`, calls `notify(..., 'ingest.failed', {error: 'parse_error_preserved_existing'})`; (c) parse-error over an empty/absent prior profile still performs the `UPDATE` (today's first-ingest behavior unchanged).
+- [x] T-277 GREEN — `worker/jobs/ingest-cv.mjs`: pre-read `cv_markdown, profile_json` via `tenantQuery` before building the prompt; add the D2 sanity guard immediately before `UPDATE users`.
 
 **Acceptance (T-274..T-277)**: `make test-worker` green; a shorter tailored CV re-paste preserves prior role detail (per spec scenario); a parse error never overwrites a good profile.
 
