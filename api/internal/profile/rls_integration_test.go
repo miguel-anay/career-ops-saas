@@ -130,6 +130,27 @@ func TestUndoEdit_Integration(t *testing.T) {
 		require.NoError(t, err)
 		require.JSONEq(t, `"cv-derived narrative"`, string(got.Profile["narrative"]), "effective value falls back to profile_json after undo")
 	})
+
+	t.Run("undoing an already-undone edit returns ErrAlreadyUndone, does not re-drop a later edit's key", func(t *testing.T) {
+		// After the previous subtest, `edit` is already undone. If the user
+		// re-applies an override on the same field_path and then repeats the
+		// OLD (now-undone) undo call, it must not re-drop the NEW override.
+		newEdit, err := svc.ApplyOverride(ctx, userA, "narrative", json.RawMessage(`"second manual edit"`))
+		require.NoError(t, err)
+
+		err = svc.UndoEdit(ctx, userA, edit.ID) // edit.ID is the FIRST (already-undone) edit
+		require.ErrorIs(t, err, profile.ErrAlreadyUndone)
+
+		var overridesA json.RawMessage
+		qErr := h.AdminPool.QueryRow(ctx, `SELECT profile_overrides FROM users WHERE id = $1`, userA).Scan(&overridesA)
+		require.NoError(t, qErr)
+		require.JSONEq(t, `{"narrative":"second manual edit"}`, string(overridesA), "the second edit's override must survive the stale undo call")
+
+		var newStatus string
+		qErr = h.AdminPool.QueryRow(ctx, `SELECT status FROM profile_edits WHERE id = $1`, newEdit.ID).Scan(&newStatus)
+		require.NoError(t, qErr)
+		require.Equal(t, "accepted", newStatus, "the second edit's ledger row must be untouched by the stale undo")
+	})
 }
 
 func mustSetProfileJSON(ctx context.Context, t *testing.T, h *rlsdb.Harness, userID uuid.UUID, profileJSON string) {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -24,6 +25,11 @@ var ErrNotFound = errors.New("not found")
 // call, at the trust boundary.
 var ErrInvalidFieldPath = errors.New("invalid field_path")
 
+// ErrAlreadyUndone is returned when UndoEdit targets an edit whose status
+// is already "undone" — repeating the undo would re-drop whatever key
+// currently occupies fieldPath, which may by then belong to a later edit.
+var ErrAlreadyUndone = errors.New("edit already undone")
+
 // allowedFieldPaths is the fixed set of top-level profile_json keys a
 // manual PATCH may target (design D5). Anything else is rejected at the
 // trust boundary before touching the DB.
@@ -41,9 +47,10 @@ func isAllowedFieldPath(fieldPath string) bool {
 }
 
 // mergeProfile overlays override keys onto the base profile (shallow, per
-// top-level key). Both args are raw jsonb bytes from users. Never errors —
-// malformed/empty input degrades to an empty map for that side.
-func mergeProfile(base, overrides []byte) (map[string]json.RawMessage, error) {
+// top-level key). Both args are raw jsonb bytes from users. Malformed/empty
+// input degrades to an empty map for that side — this never fails, so it
+// takes no error return (there is nothing a caller could do differently).
+func mergeProfile(base, overrides []byte) map[string]json.RawMessage {
 	out := map[string]json.RawMessage{}
 	if len(base) > 0 {
 		_ = json.Unmarshal(base, &out)
@@ -55,21 +62,49 @@ func mergeProfile(base, overrides []byte) (map[string]json.RawMessage, error) {
 	for k, v := range ov {
 		out[k] = v // whole-key replace
 	}
-	return out, nil
+	return out
+}
+
+// ProfileEditView is the wire shape for a profile_edits row — plain JSON
+// values for old_value/new_value instead of db.ProfileEdit's sqlc-generated
+// pqtype.NullRawMessage/sql.NullTime wrappers, which have no custom
+// MarshalJSON and would otherwise serialize as {"RawMessage":...,"Valid":...}.
+type ProfileEditView struct {
+	ID         uuid.UUID       `json:"id"`
+	FieldPath  string          `json:"field_path"`
+	OldValue   json.RawMessage `json:"old_value,omitempty"`
+	NewValue   json.RawMessage `json:"new_value,omitempty"`
+	Source     string          `json:"source"`
+	Status     string          `json:"status"`
+	CreatedAt  time.Time       `json:"created_at"`
+	ResolvedAt *time.Time      `json:"resolved_at,omitempty"`
+}
+
+func toProfileEditView(e db.ProfileEdit) ProfileEditView {
+	v := ProfileEditView{
+		ID:        e.ID,
+		FieldPath: e.FieldPath,
+		Source:    e.Source,
+		Status:    e.Status,
+		CreatedAt: e.CreatedAt,
+	}
+	if e.OldValue.Valid {
+		v.OldValue = e.OldValue.RawMessage
+	}
+	if e.NewValue.Valid {
+		v.NewValue = e.NewValue.RawMessage
+	}
+	if e.ResolvedAt.Valid {
+		v.ResolvedAt = &e.ResolvedAt.Time
+	}
+	return v
 }
 
 // EffectiveProfile is the GET /api/me/profile response shape.
 type EffectiveProfile struct {
 	CVMarkdown string                     `json:"cv_markdown"`
 	Profile    map[string]json.RawMessage `json:"profile"`
-	Edits      []db.ProfileEdit           `json:"edits"`
-}
-
-// Servicer is the interface that handlers depend on.
-type Servicer interface {
-	GetProfile(ctx context.Context, userID uuid.UUID) (*EffectiveProfile, error)
-	ApplyOverride(ctx context.Context, userID uuid.UUID, fieldPath string, value json.RawMessage) (*db.ProfileEdit, error)
-	UndoEdit(ctx context.Context, userID, editID uuid.UUID) error
+	Edits      []ProfileEditView          `json:"edits"`
 }
 
 // Service contains business logic for the profile domain.
@@ -91,20 +126,21 @@ func (s *Service) GetProfile(ctx context.Context, userID uuid.UUID) (*EffectiveP
 		if err != nil {
 			return err
 		}
-		merged, err := mergeProfile(u.ProfileJson, u.ProfileOverrides)
-		if err != nil {
-			return err
-		}
+		merged := mergeProfile(u.ProfileJson, u.ProfileOverrides)
 
 		edits, err := q.ListProfileEditsByUser(ctx, userID)
 		if err != nil {
 			return err
 		}
+		views := make([]ProfileEditView, len(edits))
+		for i, e := range edits {
+			views[i] = toProfileEditView(e)
+		}
 
 		result = EffectiveProfile{
 			CVMarkdown: u.CvMarkdown.String,
 			Profile:    merged,
-			Edits:      edits,
+			Edits:      views,
 		}
 		return nil
 	})
@@ -117,21 +153,33 @@ func (s *Service) GetProfile(ctx context.Context, userID uuid.UUID) (*EffectiveP
 	return &result, nil
 }
 
-// currentKey returns the effective (merged) value of fieldPath, or nil if
-// absent from both base and overrides.
+// currentKey returns the effective value of fieldPath — an override wins
+// over the CV-derived value — without merging every other top-level key
+// just to read the one that's needed.
 func currentKey(base, overrides []byte, fieldPath string) pqtype.NullRawMessage {
-	merged, _ := mergeProfile(base, overrides)
-	v, ok := merged[fieldPath]
-	if !ok {
-		return pqtype.NullRawMessage{}
+	if len(overrides) > 0 {
+		var ov map[string]json.RawMessage
+		if err := json.Unmarshal(overrides, &ov); err == nil {
+			if v, ok := ov[fieldPath]; ok {
+				return pqtype.NullRawMessage{RawMessage: v, Valid: true}
+			}
+		}
 	}
-	return pqtype.NullRawMessage{RawMessage: v, Valid: true}
+	if len(base) > 0 {
+		var b map[string]json.RawMessage
+		if err := json.Unmarshal(base, &b); err == nil {
+			if v, ok := b[fieldPath]; ok {
+				return pqtype.NullRawMessage{RawMessage: v, Valid: true}
+			}
+		}
+	}
+	return pqtype.NullRawMessage{}
 }
 
 // ApplyOverride writes the given top-level key into users.profile_overrides
 // AND inserts a profile_edits ledger row (source=manual, status=accepted)
 // atomically in ONE platform.WithTenantTx (design D5).
-func (s *Service) ApplyOverride(ctx context.Context, userID uuid.UUID, fieldPath string, value json.RawMessage) (*db.ProfileEdit, error) {
+func (s *Service) ApplyOverride(ctx context.Context, userID uuid.UUID, fieldPath string, value json.RawMessage) (*ProfileEditView, error) {
 	if !isAllowedFieldPath(fieldPath) {
 		return nil, ErrInvalidFieldPath
 	}
@@ -165,7 +213,8 @@ func (s *Service) ApplyOverride(ctx context.Context, userID uuid.UUID, fieldPath
 	if err != nil {
 		return nil, fmt.Errorf("apply override: %w", err)
 	}
-	return &edit, nil
+	view := toProfileEditView(edit)
+	return &view, nil
 }
 
 // UndoEdit drops the override key that editID wrote and flips the ledger
@@ -179,6 +228,13 @@ func (s *Service) UndoEdit(ctx context.Context, userID, editID uuid.UUID) error 
 		edit, err := q.GetProfileEdit(ctx, editID)
 		if err != nil {
 			return err
+		}
+		// A second undo on an already-undone edit must not silently
+		// "succeed" again — it would re-drop whatever key currently
+		// occupies fieldPath, which by then may belong to an unrelated,
+		// later edit of the same field.
+		if edit.Status == "undone" {
+			return ErrAlreadyUndone
 		}
 
 		if _, err := q.DropProfileOverrideKey(ctx, db.DropProfileOverrideKeyParams{
@@ -194,6 +250,9 @@ func (s *Service) UndoEdit(ctx context.Context, userID, editID uuid.UUID) error 
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
+		}
+		if errors.Is(err, ErrAlreadyUndone) {
+			return ErrAlreadyUndone
 		}
 		return fmt.Errorf("undo edit: %w", err)
 	}

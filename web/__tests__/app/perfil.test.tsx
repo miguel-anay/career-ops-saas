@@ -96,6 +96,7 @@ describe('Perfil page (app/perfil/page.tsx)', () => {
   it('clicking Undo calls apiPost on the undo endpoint and refetches the profile', async () => {
     mockApiGet.mockResolvedValueOnce(mockProfile).mockResolvedValueOnce({
       ...mockProfile,
+      profile: { ...mockProfile.profile, narrative: 'CV-derived narrative (reverted)' },
       edits: [{ ...mockProfile.edits[0], status: 'undone' }],
     })
     mockApiPost.mockResolvedValueOnce(undefined)
@@ -111,6 +112,14 @@ describe('Perfil page (app/perfil/page.tsx)', () => {
 
     await waitFor(() => {
       expect(mockApiGet).toHaveBeenCalledTimes(2)
+    })
+
+    // Regression guard: the edit form must resync to the post-undo value —
+    // ProfileEditForm is never remounted, so its draft state has to react
+    // to the `profile` prop changing, not just seed once on first mount.
+    await waitFor(() => {
+      const textarea = screen.getByLabelText('narrative') as HTMLTextAreaElement
+      expect(textarea.value).toContain('CV-derived narrative (reverted)')
     })
   })
 })

@@ -1,6 +1,7 @@
 package profile
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -9,6 +10,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/miguel-anay/career-ops-saas/api/internal/middleware"
 )
+
+// Servicer is the interface Handler depends on.
+type Servicer interface {
+	GetProfile(ctx context.Context, userID uuid.UUID) (*EffectiveProfile, error)
+	ApplyOverride(ctx context.Context, userID uuid.UUID, fieldPath string, value json.RawMessage) (*ProfileEditView, error)
+	UndoEdit(ctx context.Context, userID, editID uuid.UUID) error
+}
 
 // Handler holds dependencies for profile HTTP handlers.
 type Handler struct {
@@ -95,11 +103,14 @@ func (h *Handler) UndoEdit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.svc.UndoEdit(r.Context(), userID, editID); err != nil {
-		if errors.Is(err, ErrNotFound) {
+		switch {
+		case errors.Is(err, ErrNotFound):
 			writeError(w, http.StatusNotFound, "edit not found", "not_found")
-			return
+		case errors.Is(err, ErrAlreadyUndone):
+			writeError(w, http.StatusConflict, "edit already undone", "already_undone")
+		default:
+			writeError(w, http.StatusInternalServerError, "failed to undo edit", "internal_error")
 		}
-		writeError(w, http.StatusInternalServerError, "failed to undo edit", "internal_error")
 		return
 	}
 

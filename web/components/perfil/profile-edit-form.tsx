@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -28,6 +28,14 @@ export function ProfileEditForm({ profile, onSaved }: ProfileEditFormProps) {
     Object.fromEntries(FIELD_PATHS.map(fp => [fp, JSON.stringify(profile[fp] ?? null, null, 2)]))
   )
   const [savingField, setSavingField] = useState<string | null>(null)
+
+  // `profile` is a plain prop (this component is never remounted with a new
+  // `key`), so the useState initializer above only runs once. Without this,
+  // an Undo elsewhere on the page (which refetches and updates `profile`)
+  // would leave this form silently showing the pre-undo draft text.
+  useEffect(() => {
+    setDrafts(Object.fromEntries(FIELD_PATHS.map(fp => [fp, JSON.stringify(profile[fp] ?? null, null, 2)])))
+  }, [profile])
 
   const handleSave = async (fieldPath: string) => {
     let value: unknown
