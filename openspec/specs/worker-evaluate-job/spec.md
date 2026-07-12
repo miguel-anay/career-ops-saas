@@ -193,6 +193,15 @@ The rewritten `worker/tests/jobs/evaluate.test.mjs` MUST verify behavior by asse
 - AND the system prompt instructs STAR-mapping and negotiation-guidance generation
 - AND the resulting prompt still requests exactly 7 blocks (A-G) with the same field names as before
 
+### Requirement R7: Evaluation prompt consumes the effective profile, not raw `profile_json`
+
+`worker/lib/prompt.mjs` MUST compute the effective profile (`{ ...profile_json, ...profile_overrides }`, via a small duplicated JS merge fn — no cross-language sharing with the Go merge) before injecting profile data into `buildEvaluationPrompt`. Raw `profile_json` alone MUST NOT be injected when `profile_overrides` is non-empty.
+
+#### Scenario: Manually-overridden target role is reflected in the evaluation
+- GIVEN a user with `profile_json.target_roles.primary = ["Backend Engineer"]` and `profile_overrides.target_roles.primary = ["Staff Engineer"]`
+- WHEN `evaluate-job` builds the Anthropic prompt for that user
+- THEN the prompt's profile data reflects `"Staff Engineer"`, not `"Backend Engineer"`
+
 ## Architectural Shape
 
 The evaluate-job handler is implemented as:

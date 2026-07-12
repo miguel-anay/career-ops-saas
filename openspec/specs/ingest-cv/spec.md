@@ -76,44 +76,46 @@ The status endpoint MUST let a caller poll the state of their own ingestion run,
 - **When** the caller calls `GET /api/cv/ingest/X` for any `X`
 - **Then** the API responds `401 Unauthorized`
 
-## Requirement 3 — Worker `ingest-cv` job processes the CV without losing the row
+## Requirement 3 — Worker `ingest-cv` job merges CV content and never overwrites a good profile with a parse failure
 
-The worker MUST call Claude exactly once per job, parse the response for both `cv_markdown` and `profile_json` using a guard that never throws, and always leave the ingestion row in a terminal, inspectable state.
+The worker MUST call Claude exactly once per job, pass the user's EXISTING `cv_markdown` as context so the model produces a comprehensive superset (never a subset) on write, parse the response for both `cv_markdown` and `profile_json` using a guard that never throws, and always leave the ingestion row in a terminal, inspectable state.
+(Previously: the worker always overwrote `cv_markdown`/`profile_json` wholesale from the new response, including writing `{"parse_error": true}` over a previously good `profile_json` on any parse failure.)
 
-#### Scenario: Successful parse — happy path
-- **Given** a pg-boss `ingest-cv` job with payload `{user_id, run_id, raw_cv}`
-- **When** `handleIngestCV(job)` runs and Claude returns a response containing both a CV markdown block and a valid JSON `profile_json` block
-- **Then** exactly one call is made to the Anthropic client (`ingestCV(...)` in `worker/lib/anthropic.mjs`)
-- **And** `tenantQuery(userId, 'UPDATE users SET cv_markdown=$1, profile_json=$2 WHERE id=$3', [cv_markdown, profile_json, userId])` is executed
-- **And** the `cv_ingestions` row for `run_id` is updated to `status = 'completed'`, `finished_at` set
-- **And** `notify(client, run_id, 'ingest.completed', { ... })` is called on the `scan_progress` channel
+#### Scenario: Successful parse — merge-aware happy path
+- **Given** a pg-boss `ingest-cv` job with payload `{user_id, run_id, raw_cv}` and an existing non-null `users.cv_markdown`
+- **When** `handleIngestCV(job)` runs, the ingest prompt is given the prior `cv_markdown`, and Claude returns a merged markdown block plus a valid `profile_json` block
+- **Then** exactly one Anthropic call is made
+- **And** the persisted `cv_markdown` is a superset of the prior content (never smaller/less detailed)
+- **And** `cv_ingestions` transitions to `status = 'completed'`, and `notify(..., 'ingest.completed', ...)` fires
 
-#### Scenario: Claude response fails to parse — row is never lost
-- **Given** a pg-boss `ingest-cv` job with payload `{user_id, run_id, raw_cv}`
-- **When** Claude's response cannot be parsed into a valid `cv_markdown` + `profile_json` pair (malformed delimiters, invalid JSON, etc.)
-- **Then** the parse guard does NOT throw and does NOT crash the job handler
-- **And** `users.cv_markdown` is still written with the raw text extracted/returned by Claude (best-effort, never null on this path)
-- **And** `users.profile_json` is written as `{"parse_error": true}`
-- **And** the `cv_ingestions` row for `run_id` is updated to `status = 'failed'`, `finished_at` set (the row is preserved, never deleted)
-- **And** `notify(client, run_id, 'ingest.failed', { ... })` is called
+#### Scenario: Shorter tailored CV re-paste preserves older role detail
+- **Given** `users.cv_markdown` already documents roles R1, R2, R3 from a prior full-history paste
+- **When** the user pastes a shorter, job-tailored CV mentioning only an updated R3, and ingestion completes
+- **Then** the persisted `cv_markdown` still contains R1 and R2 with at least their prior detail, plus R3's update
+- **And** no previously-recorded role, course, or experience entry is dropped
+
+#### Scenario: Claude response fails to parse — sanity guard preserves prior good values
+- **Given** a pg-boss `ingest-cv` job and a `users` row whose current `cv_markdown`/`profile_json` are non-null and not `{"parse_error": true}`
+- **When** Claude's response cannot be parsed into a valid `cv_markdown` + `profile_json` pair
+- **Then** the parse guard does NOT throw
+- **And** `users.cv_markdown` and `users.profile_json` are LEFT UNCHANGED — neither is overwritten with raw/partial text or `{"parse_error": true}`
+- **And** the `cv_ingestions` row for `run_id` is still updated to `status = 'failed'`, `finished_at` set, and `notify(..., 'ingest.failed', ...)` still fires
 
 #### Scenario: Anthropic call itself throws (network/API error)
 - **Given** a pg-boss `ingest-cv` job
 - **When** the call to `ingestCV(...)` throws (timeout, 5xx, rate limit)
-- **Then** the `cv_ingestions` row is updated to `status = 'failed'`, `finished_at` set
-- **And** `notify(client, run_id, 'ingest.failed', { ... })` is called
-- **And** the job handler does not leave the row stuck in `pending`/`processing` indefinitely
+- **Then** the `cv_ingestions` row is updated to `status = 'failed'`, `finished_at` set, and `notify(..., 'ingest.failed', ...)` fires
+- **And** the job handler does not leave the row stuck in `pending`/`processing`
 
 #### Scenario: Worker write respects tenant isolation
 - **Given** a job payload with `user_id = A`
 - **When** the worker performs the `UPDATE users SET cv_markdown=..., profile_json=...` write
-- **Then** the write MUST go through `tenantQuery(userId, ...)` (sets `app.current_user_id` via `SET LOCAL` inside the transaction)
-- **And** a direct, non-`tenantQuery` write path is absent from the job handler (no raw pool query bypassing RLS)
+- **Then** the write goes through `tenantQuery(userId, ...)`, and no raw pool query bypassing RLS exists in the handler
 
 #### Scenario: Job processing transitions status before completion
 - **Given** a `cv_ingestions` row created at enqueue time with `status = 'pending'`
 - **When** `handleIngestCV(job)` begins processing
-- **Then** the row transitions to `status = 'processing'` before the Claude call completes (so `GET /api/cv/ingest/:id` polling reflects in-flight work, not just pending/terminal states)
+- **Then** the row transitions to `status = 'processing'` before the Claude call completes
 
 ## Requirement 4 — `profile_json` schema is nested and `pdf.mjs` reads the new shape
 
