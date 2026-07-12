@@ -13,8 +13,27 @@ import (
 	"github.com/google/uuid"
 )
 
+const dropProfileOverrideKey = `-- name: DropProfileOverrideKey :one
+UPDATE users
+SET profile_overrides = profile_overrides - $2::text
+WHERE id = $1
+RETURNING profile_overrides
+`
+
+type DropProfileOverrideKeyParams struct {
+	ID      uuid.UUID `json:"id"`
+	Column2 string    `json:"column_2"`
+}
+
+func (q *Queries) DropProfileOverrideKey(ctx context.Context, arg DropProfileOverrideKeyParams) (json.RawMessage, error) {
+	row := q.db.QueryRowContext(ctx, dropProfileOverrideKey, arg.ID, arg.Column2)
+	var profile_overrides json.RawMessage
+	err := row.Scan(&profile_overrides)
+	return profile_overrides, err
+}
+
 const getUserByGoogleID = `-- name: GetUserByGoogleID :one
-SELECT id, email, google_id, plan, cv_markdown, profile_json, created_at, google_refresh_token FROM users
+SELECT id, email, google_id, plan, cv_markdown, profile_json, profile_overrides, created_at, google_refresh_token FROM users
 WHERE google_id = $1
 LIMIT 1
 `
@@ -29,6 +48,7 @@ func (q *Queries) GetUserByGoogleID(ctx context.Context, googleID string) (User,
 		&i.Plan,
 		&i.CvMarkdown,
 		&i.ProfileJson,
+		&i.ProfileOverrides,
 		&i.CreatedAt,
 		&i.GoogleRefreshToken,
 	)
@@ -36,7 +56,7 @@ func (q *Queries) GetUserByGoogleID(ctx context.Context, googleID string) (User,
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, google_id, plan, cv_markdown, profile_json, created_at, google_refresh_token FROM users
+SELECT id, email, google_id, plan, cv_markdown, profile_json, profile_overrides, created_at, google_refresh_token FROM users
 WHERE id = $1
 LIMIT 1
 `
@@ -51,17 +71,56 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.Plan,
 		&i.CvMarkdown,
 		&i.ProfileJson,
+		&i.ProfileOverrides,
 		&i.CreatedAt,
 		&i.GoogleRefreshToken,
 	)
 	return i, err
 }
 
+const getUserProfile = `-- name: GetUserProfile :one
+SELECT cv_markdown, profile_json, profile_overrides
+FROM users WHERE id = $1 LIMIT 1
+`
+
+type GetUserProfileRow struct {
+	CvMarkdown       sql.NullString  `json:"cv_markdown"`
+	ProfileJson      json.RawMessage `json:"profile_json"`
+	ProfileOverrides json.RawMessage `json:"profile_overrides"`
+}
+
+func (q *Queries) GetUserProfile(ctx context.Context, id uuid.UUID) (GetUserProfileRow, error) {
+	row := q.db.QueryRowContext(ctx, getUserProfile, id)
+	var i GetUserProfileRow
+	err := row.Scan(&i.CvMarkdown, &i.ProfileJson, &i.ProfileOverrides)
+	return i, err
+}
+
+const setProfileOverrideKey = `-- name: SetProfileOverrideKey :one
+UPDATE users
+SET profile_overrides = profile_overrides || jsonb_build_object($2::text, $3::jsonb)
+WHERE id = $1
+RETURNING profile_overrides
+`
+
+type SetProfileOverrideKeyParams struct {
+	ID      uuid.UUID       `json:"id"`
+	Column2 string          `json:"column_2"`
+	Column3 json.RawMessage `json:"column_3"`
+}
+
+func (q *Queries) SetProfileOverrideKey(ctx context.Context, arg SetProfileOverrideKeyParams) (json.RawMessage, error) {
+	row := q.db.QueryRowContext(ctx, setProfileOverrideKey, arg.ID, arg.Column2, arg.Column3)
+	var profile_overrides json.RawMessage
+	err := row.Scan(&profile_overrides)
+	return profile_overrides, err
+}
+
 const updateUserCVMarkdown = `-- name: UpdateUserCVMarkdown :one
 UPDATE users
 SET cv_markdown = $2
 WHERE id = $1
-RETURNING id, email, google_id, plan, cv_markdown, profile_json, created_at, google_refresh_token
+RETURNING id, email, google_id, plan, cv_markdown, profile_json, profile_overrides, created_at, google_refresh_token
 `
 
 type UpdateUserCVMarkdownParams struct {
@@ -79,6 +138,7 @@ func (q *Queries) UpdateUserCVMarkdown(ctx context.Context, arg UpdateUserCVMark
 		&i.Plan,
 		&i.CvMarkdown,
 		&i.ProfileJson,
+		&i.ProfileOverrides,
 		&i.CreatedAt,
 		&i.GoogleRefreshToken,
 	)
@@ -89,7 +149,7 @@ const updateUserGoogleRefreshToken = `-- name: UpdateUserGoogleRefreshToken :one
 UPDATE users
 SET google_refresh_token = $2
 WHERE id = $1
-RETURNING id, email, google_id, plan, cv_markdown, profile_json, created_at, google_refresh_token
+RETURNING id, email, google_id, plan, cv_markdown, profile_json, profile_overrides, created_at, google_refresh_token
 `
 
 type UpdateUserGoogleRefreshTokenParams struct {
@@ -107,6 +167,7 @@ func (q *Queries) UpdateUserGoogleRefreshToken(ctx context.Context, arg UpdateUs
 		&i.Plan,
 		&i.CvMarkdown,
 		&i.ProfileJson,
+		&i.ProfileOverrides,
 		&i.CreatedAt,
 		&i.GoogleRefreshToken,
 	)
@@ -117,7 +178,7 @@ const updateUserPlan = `-- name: UpdateUserPlan :one
 UPDATE users
 SET plan = $2
 WHERE id = $1
-RETURNING id, email, google_id, plan, cv_markdown, profile_json, created_at, google_refresh_token
+RETURNING id, email, google_id, plan, cv_markdown, profile_json, profile_overrides, created_at, google_refresh_token
 `
 
 type UpdateUserPlanParams struct {
@@ -135,34 +196,7 @@ func (q *Queries) UpdateUserPlan(ctx context.Context, arg UpdateUserPlanParams) 
 		&i.Plan,
 		&i.CvMarkdown,
 		&i.ProfileJson,
-		&i.CreatedAt,
-		&i.GoogleRefreshToken,
-	)
-	return i, err
-}
-
-const updateUserProfileJSON = `-- name: UpdateUserProfileJSON :one
-UPDATE users
-SET profile_json = $2
-WHERE id = $1
-RETURNING id, email, google_id, plan, cv_markdown, profile_json, created_at, google_refresh_token
-`
-
-type UpdateUserProfileJSONParams struct {
-	ID          uuid.UUID       `json:"id"`
-	ProfileJson json.RawMessage `json:"profile_json"`
-}
-
-func (q *Queries) UpdateUserProfileJSON(ctx context.Context, arg UpdateUserProfileJSONParams) (User, error) {
-	row := q.db.QueryRowContext(ctx, updateUserProfileJSON, arg.ID, arg.ProfileJson)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.Email,
-		&i.GoogleID,
-		&i.Plan,
-		&i.CvMarkdown,
-		&i.ProfileJson,
+		&i.ProfileOverrides,
 		&i.CreatedAt,
 		&i.GoogleRefreshToken,
 	)
