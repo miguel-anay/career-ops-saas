@@ -75,17 +75,17 @@ Chain strategy: stacked-to-main
 
 ## Phase 6: Web — `/perfil` page (Unit 2)
 
-- [ ] T-290 `web/components/perfil/cv-markdown-view.tsx` (new) — `CvMarkdownView`: read-only render of `cv_markdown` (reuse the report view's markdown renderer if one exists; plain `<pre>` fallback).
-- [ ] T-291 `web/components/perfil/profile-edit-form.tsx` (new) — `ProfileEditForm`: plain inputs/textareas for the 6 allowlisted top-level keys; on save calls `apiPatch('/api/me/profile', {field_path, value})`, then triggers parent refetch.
-- [ ] T-292 `web/components/perfil/manual-edits-list.tsx` (new) — `ManualEditsList`: renders `edits` (status `accepted`), each row with an Undo button calling `apiPost('/api/me/profile-edits/{id}/undo')`, then triggers parent refetch.
-- [ ] T-293 `web/app/(app)/perfil/page.tsx` (modify) — replace the `ComingSoon` stub with a client component: `apiGet('/api/me/profile')` on mount, local `useState` for profile/edits/loading, compose the three components above, refetch-on-mutation.
-- [ ] T-294 `web/__tests__/app/perfil.test.tsx` (new, structural pattern per `companies.test.tsx`) — mocks `apiGet`/`apiPatch`/`apiPost`: (a) renders CV markdown + profile fields on mount; (b) submitting the edit form calls `apiPatch` and the edits list updates; (c) clicking Undo calls `apiPost(.../undo)` and the list reflects the revert.
+- [x] T-290 `web/components/perfil/cv-markdown-view.tsx` (new) — `CvMarkdownView`: read-only render of `cv_markdown` (reuse the report view's markdown renderer if one exists; plain `<pre>` fallback).
+- [x] T-291 `web/components/perfil/profile-edit-form.tsx` (new) — `ProfileEditForm`: plain inputs/textareas for the 6 allowlisted top-level keys; on save calls `apiPatch('/api/me/profile', {field_path, value})`, then triggers parent refetch.
+- [x] T-292 `web/components/perfil/manual-edits-list.tsx` (new) — `ManualEditsList`: renders `edits` (status `accepted`), each row with an Undo button calling `apiPost('/api/me/profile-edits/{id}/undo')`, then triggers parent refetch.
+- [x] T-293 `web/app/(app)/perfil/page.tsx` (modify) — replace the `ComingSoon` stub with a client component: `apiGet('/api/me/profile')` on mount, local `useState` for profile/edits/loading, compose the three components above, refetch-on-mutation.
+- [x] T-294 `web/__tests__/app/perfil.test.tsx` (new, structural pattern per `companies.test.tsx`) — mocks `apiGet`/`apiPatch`/`apiPost`: (a) renders CV markdown + profile fields on mount; (b) submitting the edit form calls `apiPatch` and the edits list updates; (c) clicking Undo calls `apiPost(.../undo)` and the list reflects the revert.
 
 **Acceptance (T-290..T-294)**: `make test-web` green; page renders CV + effective profile + editable form + undoable edits list per spec's web requirement.
 
 ## Phase 7: Cross-cutting Verification
 
-- [ ] T-295 Run `make test-all` (Go + worker + web + RLS) and confirm all suites are green before opening either PR.
+- [x] T-295 Run `make test-all` (Go + worker + web + RLS) and confirm all suites are green before opening either PR.
 
 ## Dependencies Between Units
 
