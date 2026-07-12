@@ -53,8 +53,8 @@ Chain strategy: stacked-to-main
 
 ## Phase 4: Worker — Effective Profile in Evaluation Prompt (Unit 1)
 
-- [ ] T-278 RED — `worker/tests/lib/prompt.test.mjs`: `mergeProfile(profileJson, profileOverrides)` — override key wins over `profile_json`, non-overridden keys pass through unchanged, handles both string and object inputs.
-- [ ] T-279 GREEN — `worker/lib/prompt.mjs`: add `mergeProfile` (D3 exact 4-line JS merge), extend the user SELECT to include `profile_overrides`, feed `JSON.stringify(mergeProfile(...))` into `cvAndProfileBlock` in place of raw `profileJson`.
+- [x] T-278 RED — `worker/tests/lib/prompt.test.mjs`: `mergeProfile(profileJson, profileOverrides)` — override key wins over `profile_json`, non-overridden keys pass through unchanged, handles both string and object inputs.
+- [x] T-279 GREEN — `worker/lib/prompt.mjs`: add `mergeProfile` (D3 exact 4-line JS merge), extend the user SELECT to include `profile_overrides`, feed `JSON.stringify(mergeProfile(...))` into `cvAndProfileBlock` in place of raw `profileJson`.
 
 **Acceptance (T-278..T-279)**: `buildEvaluationPrompt` output reflects an overridden `target_roles` over the raw `profile_json` value (spec scenario, Domain worker-evaluate-job R7).
 

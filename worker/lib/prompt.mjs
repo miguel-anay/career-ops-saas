@@ -30,13 +30,30 @@ function describePostingAge(receivedAt) {
   return `posted ${days} day${days === 1 ? '' : 's'} ago`
 }
 
+/**
+ * Compute the effective profile: a shallow, top-level-key overlay of
+ * `profileOverrides` onto `profileJson` (design.md D3). Deliberately
+ * duplicated in the Go `profile` package (D2/job-content-fetch precedent —
+ * no cross-language sharing for a 4-line merge).
+ *
+ * @param {string | object | null | undefined} profileJson
+ * @param {string | object | null | undefined} profileOverrides
+ * @returns {object}
+ */
+// ponytail: 4-line shallow merge, duplicated per D2/job-content-fetch precedent
+export function mergeProfile(profileJson, profileOverrides) {
+  const base = typeof profileJson === 'string' ? JSON.parse(profileJson || '{}') : (profileJson || {})
+  const ov = typeof profileOverrides === 'string' ? JSON.parse(profileOverrides || '{}') : (profileOverrides || {})
+  return { ...base, ...ov }
+}
+
 export async function buildEvaluationPrompt(userId, jobId, db) {
   const { tenantQuery } = db
 
   // Fetch user data (CV + profile)
   const userResult = await tenantQuery(
     userId,
-    `SELECT cv_markdown, profile_json FROM users WHERE id = $1::uuid LIMIT 1`,
+    `SELECT cv_markdown, profile_json, profile_overrides FROM users WHERE id = $1::uuid LIMIT 1`,
     [userId]
   )
   const user = userResult.rows[0] || {}
@@ -50,9 +67,7 @@ export async function buildEvaluationPrompt(userId, jobId, db) {
   const job = jobResult.rows[0] || {}
 
   const cvMarkdown = user.cv_markdown || ''
-  const profileJson = typeof user.profile_json === 'string'
-    ? user.profile_json
-    : JSON.stringify(user.profile_json || {})
+  const profileJson = JSON.stringify(mergeProfile(user.profile_json, user.profile_overrides))
   const scrapedContent = job.scraped_content || ''
   const jobTitle = job.title || ''
   const jobCompany = job.company || ''
