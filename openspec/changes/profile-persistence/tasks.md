@@ -60,16 +60,16 @@ Chain strategy: stacked-to-main
 
 ## Phase 5: Go API — `profile` package (Unit 2)
 
-- [ ] T-280 RED — `api/internal/profile/service_test.go`: `mergeProfile(base, overrides []byte)` — override key replaces the whole top-level key; non-overridden keys pass through; empty/nil inputs don't panic.
-- [ ] T-281 GREEN — `api/internal/profile/service.go`: implement `mergeProfile` (D3 exact Go func) + `Servicer` interface (`GetProfile`, `ApplyOverride`, `UndoEdit`) + `NewService(pool)`.
-- [ ] T-282 RED — `api/internal/profile/service_test.go`: `ApplyOverride` rejects a `fieldPath` outside the allowlist (`target_roles`, `salary_target`, `narrative`, `candidate`, `deal_breakers`, `comp_targets`) with a 400-mapped error, before touching the DB.
-- [ ] T-283 GREEN — `api/internal/profile/service.go`: add the allowlist check at the top of `ApplyOverride`.
-- [ ] T-284 RED — `api/internal/profile/rls_integration_test.go` (mirrors `cv/rls_integration_test.go`, DB-gated via `TEST_DATABASE_URL`): `ApplyOverride` writes the override key AND inserts one `profile_edits` row atomically in a single `WithTenantTx` (both committed together); a forced failure mid-transaction leaves neither write persisted.
-- [ ] T-285 GREEN — `api/internal/profile/service.go`: implement `ApplyOverride` per design D5 (`GetUserProfile` → compute `oldVal` → `SetProfileOverrideKey` → `InsertProfileEdit`, one tx).
-- [ ] T-286 RED — same integration test file: `UndoEdit` on another tenant's `editID` returns not-found (RLS-scoped `GetProfileEdit` returns `sql.ErrNoRows`), with no `profile_overrides` mutation for either user; `UndoEdit` on the caller's own edit drops the override key and flips the ledger row to `undone`.
-- [ ] T-287 GREEN — `api/internal/profile/service.go`: implement `UndoEdit` per design D5.
-- [ ] T-288 `api/internal/profile/handler.go` (new) — `Handler` struct wrapping `Servicer`; `RegisterRoutes` for `GET /api/me/profile`, `PATCH /api/me/profile`, `POST /api/me/profile-edits/{id}/undo`; request/response shapes per design D5 (`EffectiveProfile`, PATCH body `{field_path, value}`, undo `204`).
-- [ ] T-289 `api/cmd/api/main.go` — wire `profileHandler := profile.NewHandler(profile.NewService(pool)); profileHandler.RegisterRoutes(r)` alongside the other handlers.
+- [x] T-280 RED — `api/internal/profile/service_test.go`: `mergeProfile(base, overrides []byte)` — override key replaces the whole top-level key; non-overridden keys pass through; empty/nil inputs don't panic.
+- [x] T-281 GREEN — `api/internal/profile/service.go`: implement `mergeProfile` (D3 exact Go func) + `Servicer` interface (`GetProfile`, `ApplyOverride`, `UndoEdit`) + `NewService(pool)`.
+- [x] T-282 RED — `api/internal/profile/service_test.go`: `ApplyOverride` rejects a `fieldPath` outside the allowlist (`target_roles`, `salary_target`, `narrative`, `candidate`, `deal_breakers`, `comp_targets`) with a 400-mapped error, before touching the DB.
+- [x] T-283 GREEN — `api/internal/profile/service.go`: add the allowlist check at the top of `ApplyOverride`.
+- [x] T-284 RED — `api/internal/profile/rls_integration_test.go` (mirrors `cv/rls_integration_test.go`, DB-gated via `TEST_DATABASE_URL`): `ApplyOverride` writes the override key AND inserts one `profile_edits` row atomically in a single `WithTenantTx` (both committed together); a forced failure mid-transaction leaves neither write persisted.
+- [x] T-285 GREEN — `api/internal/profile/service.go`: implement `ApplyOverride` per design D5 (`GetUserProfile` → compute `oldVal` → `SetProfileOverrideKey` → `InsertProfileEdit`, one tx).
+- [x] T-286 RED — same integration test file: `UndoEdit` on another tenant's `editID` returns not-found (RLS-scoped `GetProfileEdit` returns `sql.ErrNoRows`), with no `profile_overrides` mutation for either user; `UndoEdit` on the caller's own edit drops the override key and flips the ledger row to `undone`.
+- [x] T-287 GREEN — `api/internal/profile/service.go`: implement `UndoEdit` per design D5.
+- [x] T-288 `api/internal/profile/handler.go` (new) — `Handler` struct wrapping `Servicer`; `RegisterRoutes` for `GET /api/me/profile`, `PATCH /api/me/profile`, `POST /api/me/profile-edits/{id}/undo`; request/response shapes per design D5 (`EffectiveProfile`, PATCH body `{field_path, value}`, undo `204`).
+- [x] T-289 `api/cmd/api/main.go` — wire `profileHandler := profile.NewHandler(profile.NewService(pool)); profileHandler.RegisterRoutes(r)` alongside the other handlers.
 
 **Acceptance (T-280..T-289)**: `make test-go` green; `GET /api/me/profile` returns the merged effective profile; a cross-tenant undo 404s; PATCH+ledger insert is all-or-nothing.
 
