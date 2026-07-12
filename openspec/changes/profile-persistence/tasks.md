@@ -27,18 +27,18 @@ Chain strategy: stacked-to-main
 
 ## Phase 1: Database (Unit 1)
 
-- [ ] T-267 `db/migrations/007_profile_persistence.sql` — add `users.profile_overrides jsonb NOT NULL DEFAULT '{}'`, create `profile_edits` table (D4 exact DDL: columns, `CHECK` on `source`/`status`, index), `ENABLE`+`FORCE ROW LEVEL SECURITY`, `tenant_profile_edits` policy (NULLIF-hardened), `GRANT ... TO app_user`.
-- [ ] T-268 `db/schema.sql` — mirror the migration: add `profile_overrides` column to `users`, add `profile_edits` table definition, canonical and in sync with 007.
-- [ ] T-269 `db/rls.sql` — add `ALTER TABLE profile_edits ENABLE/FORCE ROW LEVEL SECURITY` + `tenant_profile_edits` policy, matching `tenant_cvs` shape.
-- [ ] T-270 `db/queries/profile_edits.sql` (new) — `InsertProfileEdit`, `ListProfileEditsByUser`, `GetProfileEdit`, `MarkProfileEditUndone` per design D4.
-- [ ] T-271 `db/queries/users.sql` — remove `UpdateUserProfileJSON`; add `GetUserProfile`, `SetProfileOverrideKey`, `DropProfileOverrideKey` per design D4.
-- [ ] T-272 Run `cd db && sqlc generate`; commit regenerated `api/internal/db/*` output (no hand-edits).
+- [x] T-267 `db/migrations/007_profile_persistence.sql` — add `users.profile_overrides jsonb NOT NULL DEFAULT '{}'`, create `profile_edits` table (D4 exact DDL: columns, `CHECK` on `source`/`status`, index), `ENABLE`+`FORCE ROW LEVEL SECURITY`, `tenant_profile_edits` policy (NULLIF-hardened), `GRANT ... TO app_user`.
+- [x] T-268 `db/schema.sql` — mirror the migration: add `profile_overrides` column to `users`, add `profile_edits` table definition, canonical and in sync with 007.
+- [x] T-269 `db/rls.sql` — add `ALTER TABLE profile_edits ENABLE/FORCE ROW LEVEL SECURITY` + `tenant_profile_edits` policy, matching `tenant_cvs` shape.
+- [x] T-270 `db/queries/profile_edits.sql` (new) — `InsertProfileEdit`, `ListProfileEditsByUser`, `GetProfileEdit`, `MarkProfileEditUndone` per design D4.
+- [x] T-271 `db/queries/users.sql` — remove `UpdateUserProfileJSON`; add `GetUserProfile`, `SetProfileOverrideKey`, `DropProfileOverrideKey` per design D4.
+- [x] T-272 Run `cd db && sqlc generate`; commit regenerated `api/internal/db/*` output (no hand-edits).
 
 **Acceptance (T-267..T-272)**: migration applies cleanly on top of 006; `db/schema.sql`/`db/rls.sql` match the migration; `sqlc generate` produces no diff-drift on re-run; `UpdateUserProfileJSON` has no remaining callers.
 
 ## Phase 2: pgTAP RLS Test (Unit 1)
 
-- [ ] T-273 `db/tests/profile_edits_rls.test.sql` (new, mirrors `db/tests/cv_ingestions_rls.test.sql`) — assert `profile_edits` `relrowsecurity`/`relforcerowsecurity` true; user B cannot SELECT/UPDATE user A's row; user B cannot INSERT a row claiming user A's `user_id` (`WITH CHECK` denies, `42501`).
+- [x] T-273 `db/tests/profile_edits_rls.test.sql` (new, mirrors `db/tests/cv_ingestions_rls.test.sql`) — assert `profile_edits` `relrowsecurity`/`relforcerowsecurity` true; user B cannot SELECT/UPDATE user A's row; user B cannot INSERT a row claiming user A's `user_id` (`WITH CHECK` denies, `42501`).
 
 **Acceptance (T-273)**: `make test-rls` passes, including the new suite.
 
