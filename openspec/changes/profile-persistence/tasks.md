@@ -27,65 +27,65 @@ Chain strategy: stacked-to-main
 
 ## Phase 1: Database (Unit 1)
 
-- [ ] T-267 `db/migrations/007_profile_persistence.sql` — add `users.profile_overrides jsonb NOT NULL DEFAULT '{}'`, create `profile_edits` table (D4 exact DDL: columns, `CHECK` on `source`/`status`, index), `ENABLE`+`FORCE ROW LEVEL SECURITY`, `tenant_profile_edits` policy (NULLIF-hardened), `GRANT ... TO app_user`.
-- [ ] T-268 `db/schema.sql` — mirror the migration: add `profile_overrides` column to `users`, add `profile_edits` table definition, canonical and in sync with 007.
-- [ ] T-269 `db/rls.sql` — add `ALTER TABLE profile_edits ENABLE/FORCE ROW LEVEL SECURITY` + `tenant_profile_edits` policy, matching `tenant_cvs` shape.
-- [ ] T-270 `db/queries/profile_edits.sql` (new) — `InsertProfileEdit`, `ListProfileEditsByUser`, `GetProfileEdit`, `MarkProfileEditUndone` per design D4.
-- [ ] T-271 `db/queries/users.sql` — remove `UpdateUserProfileJSON`; add `GetUserProfile`, `SetProfileOverrideKey`, `DropProfileOverrideKey` per design D4.
-- [ ] T-272 Run `cd db && sqlc generate`; commit regenerated `api/internal/db/*` output (no hand-edits).
+- [x] T-267 `db/migrations/007_profile_persistence.sql` — add `users.profile_overrides jsonb NOT NULL DEFAULT '{}'`, create `profile_edits` table (D4 exact DDL: columns, `CHECK` on `source`/`status`, index), `ENABLE`+`FORCE ROW LEVEL SECURITY`, `tenant_profile_edits` policy (NULLIF-hardened), `GRANT ... TO app_user`.
+- [x] T-268 `db/schema.sql` — mirror the migration: add `profile_overrides` column to `users`, add `profile_edits` table definition, canonical and in sync with 007.
+- [x] T-269 `db/rls.sql` — add `ALTER TABLE profile_edits ENABLE/FORCE ROW LEVEL SECURITY` + `tenant_profile_edits` policy, matching `tenant_cvs` shape.
+- [x] T-270 `db/queries/profile_edits.sql` (new) — `InsertProfileEdit`, `ListProfileEditsByUser`, `GetProfileEdit`, `MarkProfileEditUndone` per design D4.
+- [x] T-271 `db/queries/users.sql` — remove `UpdateUserProfileJSON`; add `GetUserProfile`, `SetProfileOverrideKey`, `DropProfileOverrideKey` per design D4.
+- [x] T-272 Run `cd db && sqlc generate`; commit regenerated `api/internal/db/*` output (no hand-edits).
 
 **Acceptance (T-267..T-272)**: migration applies cleanly on top of 006; `db/schema.sql`/`db/rls.sql` match the migration; `sqlc generate` produces no diff-drift on re-run; `UpdateUserProfileJSON` has no remaining callers.
 
 ## Phase 2: pgTAP RLS Test (Unit 1)
 
-- [ ] T-273 `db/tests/profile_edits_rls.test.sql` (new, mirrors `db/tests/cv_ingestions_rls.test.sql`) — assert `profile_edits` `relrowsecurity`/`relforcerowsecurity` true; user B cannot SELECT/UPDATE user A's row; user B cannot INSERT a row claiming user A's `user_id` (`WITH CHECK` denies, `42501`).
+- [x] T-273 `db/tests/profile_edits_rls.test.sql` (new, mirrors `db/tests/cv_ingestions_rls.test.sql`) — assert `profile_edits` `relrowsecurity`/`relforcerowsecurity` true; user B cannot SELECT/UPDATE user A's row; user B cannot INSERT a row claiming user A's `user_id` (`WITH CHECK` denies, `42501`).
 
 **Acceptance (T-273)**: `make test-rls` passes, including the new suite.
 
 ## Phase 3: Worker — CV Merge-on-Ingest (Unit 1)
 
-- [ ] T-274 RED — `worker/tests/lib/ingest-prompt.test.mjs`: test `buildIngestPrompt(rawCV, existingCvMarkdown)` — when `existingCvMarkdown` is non-empty, returns the `INGEST_MERGE_SYSTEM_PROMPT` system block and a user message containing both the existing CV and new text labeled distinctly; when empty, behaves exactly as today (`INGEST_SYSTEM_PROMPT`, raw-only user message).
-- [ ] T-275 GREEN — `worker/lib/ingest-prompt.mjs`: add `INGEST_MERGE_SYSTEM_PROMPT` (exact text per design D1) and change `buildIngestPrompt` signature to `(rawCV, existingCvMarkdown)`, branching on presence.
-- [ ] T-276 RED — `worker/tests/jobs/ingest-cv.test.mjs`: (a) merge case — pre-existing `cv_markdown`/`profile_json` are read and passed into `buildIngestPrompt`; (b) parse-error over a good profile skips the `UPDATE users`, marks `cv_ingestions` `failed`, calls `notify(..., 'ingest.failed', {error: 'parse_error_preserved_existing'})`; (c) parse-error over an empty/absent prior profile still performs the `UPDATE` (today's first-ingest behavior unchanged).
-- [ ] T-277 GREEN — `worker/jobs/ingest-cv.mjs`: pre-read `cv_markdown, profile_json` via `tenantQuery` before building the prompt; add the D2 sanity guard immediately before `UPDATE users`.
+- [x] T-274 RED — `worker/tests/lib/ingest-prompt.test.mjs`: test `buildIngestPrompt(rawCV, existingCvMarkdown)` — when `existingCvMarkdown` is non-empty, returns the `INGEST_MERGE_SYSTEM_PROMPT` system block and a user message containing both the existing CV and new text labeled distinctly; when empty, behaves exactly as today (`INGEST_SYSTEM_PROMPT`, raw-only user message).
+- [x] T-275 GREEN — `worker/lib/ingest-prompt.mjs`: add `INGEST_MERGE_SYSTEM_PROMPT` (exact text per design D1) and change `buildIngestPrompt` signature to `(rawCV, existingCvMarkdown)`, branching on presence.
+- [x] T-276 RED — `worker/tests/jobs/ingest-cv.test.mjs`: (a) merge case — pre-existing `cv_markdown`/`profile_json` are read and passed into `buildIngestPrompt`; (b) parse-error over a good profile skips the `UPDATE users`, marks `cv_ingestions` `failed`, calls `notify(..., 'ingest.failed', {error: 'parse_error_preserved_existing'})`; (c) parse-error over an empty/absent prior profile still performs the `UPDATE` (today's first-ingest behavior unchanged).
+- [x] T-277 GREEN — `worker/jobs/ingest-cv.mjs`: pre-read `cv_markdown, profile_json` via `tenantQuery` before building the prompt; add the D2 sanity guard immediately before `UPDATE users`.
 
 **Acceptance (T-274..T-277)**: `make test-worker` green; a shorter tailored CV re-paste preserves prior role detail (per spec scenario); a parse error never overwrites a good profile.
 
 ## Phase 4: Worker — Effective Profile in Evaluation Prompt (Unit 1)
 
-- [ ] T-278 RED — `worker/tests/lib/prompt.test.mjs`: `mergeProfile(profileJson, profileOverrides)` — override key wins over `profile_json`, non-overridden keys pass through unchanged, handles both string and object inputs.
-- [ ] T-279 GREEN — `worker/lib/prompt.mjs`: add `mergeProfile` (D3 exact 4-line JS merge), extend the user SELECT to include `profile_overrides`, feed `JSON.stringify(mergeProfile(...))` into `cvAndProfileBlock` in place of raw `profileJson`.
+- [x] T-278 RED — `worker/tests/lib/prompt.test.mjs`: `mergeProfile(profileJson, profileOverrides)` — override key wins over `profile_json`, non-overridden keys pass through unchanged, handles both string and object inputs.
+- [x] T-279 GREEN — `worker/lib/prompt.mjs`: add `mergeProfile` (D3 exact 4-line JS merge), extend the user SELECT to include `profile_overrides`, feed `JSON.stringify(mergeProfile(...))` into `cvAndProfileBlock` in place of raw `profileJson`.
 
 **Acceptance (T-278..T-279)**: `buildEvaluationPrompt` output reflects an overridden `target_roles` over the raw `profile_json` value (spec scenario, Domain worker-evaluate-job R7).
 
 ## Phase 5: Go API — `profile` package (Unit 2)
 
-- [ ] T-280 RED — `api/internal/profile/service_test.go`: `mergeProfile(base, overrides []byte)` — override key replaces the whole top-level key; non-overridden keys pass through; empty/nil inputs don't panic.
-- [ ] T-281 GREEN — `api/internal/profile/service.go`: implement `mergeProfile` (D3 exact Go func) + `Servicer` interface (`GetProfile`, `ApplyOverride`, `UndoEdit`) + `NewService(pool)`.
-- [ ] T-282 RED — `api/internal/profile/service_test.go`: `ApplyOverride` rejects a `fieldPath` outside the allowlist (`target_roles`, `salary_target`, `narrative`, `candidate`, `deal_breakers`, `comp_targets`) with a 400-mapped error, before touching the DB.
-- [ ] T-283 GREEN — `api/internal/profile/service.go`: add the allowlist check at the top of `ApplyOverride`.
-- [ ] T-284 RED — `api/internal/profile/rls_integration_test.go` (mirrors `cv/rls_integration_test.go`, DB-gated via `TEST_DATABASE_URL`): `ApplyOverride` writes the override key AND inserts one `profile_edits` row atomically in a single `WithTenantTx` (both committed together); a forced failure mid-transaction leaves neither write persisted.
-- [ ] T-285 GREEN — `api/internal/profile/service.go`: implement `ApplyOverride` per design D5 (`GetUserProfile` → compute `oldVal` → `SetProfileOverrideKey` → `InsertProfileEdit`, one tx).
-- [ ] T-286 RED — same integration test file: `UndoEdit` on another tenant's `editID` returns not-found (RLS-scoped `GetProfileEdit` returns `sql.ErrNoRows`), with no `profile_overrides` mutation for either user; `UndoEdit` on the caller's own edit drops the override key and flips the ledger row to `undone`.
-- [ ] T-287 GREEN — `api/internal/profile/service.go`: implement `UndoEdit` per design D5.
-- [ ] T-288 `api/internal/profile/handler.go` (new) — `Handler` struct wrapping `Servicer`; `RegisterRoutes` for `GET /api/me/profile`, `PATCH /api/me/profile`, `POST /api/me/profile-edits/{id}/undo`; request/response shapes per design D5 (`EffectiveProfile`, PATCH body `{field_path, value}`, undo `204`).
-- [ ] T-289 `api/cmd/api/main.go` — wire `profileHandler := profile.NewHandler(profile.NewService(pool)); profileHandler.RegisterRoutes(r)` alongside the other handlers.
+- [x] T-280 RED — `api/internal/profile/service_test.go`: `mergeProfile(base, overrides []byte)` — override key replaces the whole top-level key; non-overridden keys pass through; empty/nil inputs don't panic.
+- [x] T-281 GREEN — `api/internal/profile/service.go`: implement `mergeProfile` (D3 exact Go func) + `Servicer` interface (`GetProfile`, `ApplyOverride`, `UndoEdit`) + `NewService(pool)`.
+- [x] T-282 RED — `api/internal/profile/service_test.go`: `ApplyOverride` rejects a `fieldPath` outside the allowlist (`target_roles`, `salary_target`, `narrative`, `candidate`, `deal_breakers`, `comp_targets`) with a 400-mapped error, before touching the DB.
+- [x] T-283 GREEN — `api/internal/profile/service.go`: add the allowlist check at the top of `ApplyOverride`.
+- [x] T-284 RED — `api/internal/profile/rls_integration_test.go` (mirrors `cv/rls_integration_test.go`, DB-gated via `TEST_DATABASE_URL`): `ApplyOverride` writes the override key AND inserts one `profile_edits` row atomically in a single `WithTenantTx` (both committed together); a forced failure mid-transaction leaves neither write persisted.
+- [x] T-285 GREEN — `api/internal/profile/service.go`: implement `ApplyOverride` per design D5 (`GetUserProfile` → compute `oldVal` → `SetProfileOverrideKey` → `InsertProfileEdit`, one tx).
+- [x] T-286 RED — same integration test file: `UndoEdit` on another tenant's `editID` returns not-found (RLS-scoped `GetProfileEdit` returns `sql.ErrNoRows`), with no `profile_overrides` mutation for either user; `UndoEdit` on the caller's own edit drops the override key and flips the ledger row to `undone`.
+- [x] T-287 GREEN — `api/internal/profile/service.go`: implement `UndoEdit` per design D5.
+- [x] T-288 `api/internal/profile/handler.go` (new) — `Handler` struct wrapping `Servicer`; `RegisterRoutes` for `GET /api/me/profile`, `PATCH /api/me/profile`, `POST /api/me/profile-edits/{id}/undo`; request/response shapes per design D5 (`EffectiveProfile`, PATCH body `{field_path, value}`, undo `204`).
+- [x] T-289 `api/cmd/api/main.go` — wire `profileHandler := profile.NewHandler(profile.NewService(pool)); profileHandler.RegisterRoutes(r)` alongside the other handlers.
 
 **Acceptance (T-280..T-289)**: `make test-go` green; `GET /api/me/profile` returns the merged effective profile; a cross-tenant undo 404s; PATCH+ledger insert is all-or-nothing.
 
 ## Phase 6: Web — `/perfil` page (Unit 2)
 
-- [ ] T-290 `web/components/perfil/cv-markdown-view.tsx` (new) — `CvMarkdownView`: read-only render of `cv_markdown` (reuse the report view's markdown renderer if one exists; plain `<pre>` fallback).
-- [ ] T-291 `web/components/perfil/profile-edit-form.tsx` (new) — `ProfileEditForm`: plain inputs/textareas for the 6 allowlisted top-level keys; on save calls `apiPatch('/api/me/profile', {field_path, value})`, then triggers parent refetch.
-- [ ] T-292 `web/components/perfil/manual-edits-list.tsx` (new) — `ManualEditsList`: renders `edits` (status `accepted`), each row with an Undo button calling `apiPost('/api/me/profile-edits/{id}/undo')`, then triggers parent refetch.
-- [ ] T-293 `web/app/(app)/perfil/page.tsx` (modify) — replace the `ComingSoon` stub with a client component: `apiGet('/api/me/profile')` on mount, local `useState` for profile/edits/loading, compose the three components above, refetch-on-mutation.
-- [ ] T-294 `web/__tests__/app/perfil.test.tsx` (new, structural pattern per `companies.test.tsx`) — mocks `apiGet`/`apiPatch`/`apiPost`: (a) renders CV markdown + profile fields on mount; (b) submitting the edit form calls `apiPatch` and the edits list updates; (c) clicking Undo calls `apiPost(.../undo)` and the list reflects the revert.
+- [x] T-290 `web/components/perfil/cv-markdown-view.tsx` (new) — `CvMarkdownView`: read-only render of `cv_markdown` (reuse the report view's markdown renderer if one exists; plain `<pre>` fallback).
+- [x] T-291 `web/components/perfil/profile-edit-form.tsx` (new) — `ProfileEditForm`: plain inputs/textareas for the 6 allowlisted top-level keys; on save calls `apiPatch('/api/me/profile', {field_path, value})`, then triggers parent refetch.
+- [x] T-292 `web/components/perfil/manual-edits-list.tsx` (new) — `ManualEditsList`: renders `edits` (status `accepted`), each row with an Undo button calling `apiPost('/api/me/profile-edits/{id}/undo')`, then triggers parent refetch.
+- [x] T-293 `web/app/(app)/perfil/page.tsx` (modify) — replace the `ComingSoon` stub with a client component: `apiGet('/api/me/profile')` on mount, local `useState` for profile/edits/loading, compose the three components above, refetch-on-mutation.
+- [x] T-294 `web/__tests__/app/perfil.test.tsx` (new, structural pattern per `companies.test.tsx`) — mocks `apiGet`/`apiPatch`/`apiPost`: (a) renders CV markdown + profile fields on mount; (b) submitting the edit form calls `apiPatch` and the edits list updates; (c) clicking Undo calls `apiPost(.../undo)` and the list reflects the revert.
 
 **Acceptance (T-290..T-294)**: `make test-web` green; page renders CV + effective profile + editable form + undoable edits list per spec's web requirement.
 
 ## Phase 7: Cross-cutting Verification
 
-- [ ] T-295 Run `make test-all` (Go + worker + web + RLS) and confirm all suites are green before opening either PR.
+- [x] T-295 Run `make test-all` (Go + worker + web + RLS) and confirm all suites are green before opening either PR.
 
 ## Dependencies Between Units
 

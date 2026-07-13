@@ -6,7 +6,42 @@ vi.mock('../../lib/db.mjs', () => ({
   tenantQuery: mockTenantQuery,
 }))
 
-const { buildEvaluationPrompt } = await import('../../lib/prompt.mjs')
+const { buildEvaluationPrompt, mergeProfile } = await import('../../lib/prompt.mjs')
+
+describe('mergeProfile', () => {
+  it('an override key wins over the raw profile_json value', () => {
+    const profileJson = { target_roles: { primary: ['Backend Engineer'] }, narrative: 'x' }
+    const profileOverrides = { target_roles: { primary: ['Staff Engineer'] } }
+
+    const result = mergeProfile(profileJson, profileOverrides)
+
+    expect(result.target_roles).toEqual({ primary: ['Staff Engineer'] })
+  })
+
+  it('non-overridden keys pass through unchanged', () => {
+    const profileJson = { target_roles: ['Backend Engineer'], narrative: 'unchanged narrative' }
+    const profileOverrides = { target_roles: ['Staff Engineer'] }
+
+    const result = mergeProfile(profileJson, profileOverrides)
+
+    expect(result.narrative).toBe('unchanged narrative')
+  })
+
+  it('handles both string and object inputs', () => {
+    const objResult = mergeProfile({ a: 1 }, { b: 2 })
+    expect(objResult).toEqual({ a: 1, b: 2 })
+
+    const strResult = mergeProfile('{"a":1}', '{"b":2}')
+    expect(strResult).toEqual({ a: 1, b: 2 })
+  })
+
+  it('handles empty/nil inputs without throwing', () => {
+    expect(() => mergeProfile(null, null)).not.toThrow()
+    expect(mergeProfile(null, null)).toEqual({})
+    expect(mergeProfile(undefined, undefined)).toEqual({})
+    expect(mergeProfile('', '')).toEqual({})
+  })
+})
 
 describe('buildEvaluationPrompt', () => {
   beforeEach(() => {
@@ -165,6 +200,26 @@ describe('buildEvaluationPrompt', () => {
     expect(blockHeaders).toHaveLength(7)
     expect(staticSystemPrompt).toContain('Score: X.X/5')
     expect(staticSystemPrompt).toContain('Tier: 1-5')
+  })
+
+  it('reflects a manually-overridden target role over the raw profile_json value (R7)', async () => {
+    mockTenantQuery
+      .mockResolvedValueOnce({
+        rows: [{
+          cv_markdown: '# CV',
+          profile_json: JSON.stringify({ target_roles: { primary: ['Backend Engineer'] } }),
+          profile_overrides: JSON.stringify({ target_roles: { primary: ['Staff Engineer'] } }),
+        }],
+      })
+      .mockResolvedValueOnce({
+        rows: [{ scraped_content: 'JD', title: 'Eng', company: 'Corp', url: 'https://c.com/j' }],
+      })
+
+    const result = await buildEvaluationPrompt('uid', 'jid', { tenantQuery: mockTenantQuery })
+    const cvAndProfileBlock = result.system[1].text
+
+    expect(cvAndProfileBlock).toContain('Staff Engineer')
+    expect(cvAndProfileBlock).not.toContain('Backend Engineer')
   })
 
   it('fetches user and job using tenantQuery with userId', async () => {

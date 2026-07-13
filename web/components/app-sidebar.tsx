@@ -52,7 +52,7 @@ const NAV: NavSection[] = [
     label: 'Mi Perfil',
     items: [
       { title: 'CV', href: '/cv/ingest', icon: FileText },
-      { title: 'Perfil', href: '/perfil', icon: User, soon: true },
+      { title: 'Perfil', href: '/perfil', icon: User },
       { title: 'Article Digest', href: '/article-digest', icon: Newspaper, soon: true },
     ],
   },

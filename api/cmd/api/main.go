@@ -21,6 +21,7 @@ import (
 	"github.com/miguel-anay/career-ops-saas/api/internal/jobs"
 	"github.com/miguel-anay/career-ops-saas/api/internal/middleware"
 	"github.com/miguel-anay/career-ops-saas/api/internal/platform"
+	"github.com/miguel-anay/career-ops-saas/api/internal/profile"
 	"github.com/miguel-anay/career-ops-saas/api/internal/scan"
 	"github.com/miguel-anay/career-ops-saas/api/internal/tracker"
 	"github.com/miguel-anay/career-ops-saas/api/internal/ws"
@@ -120,6 +121,10 @@ func main() {
 		// T-38: Tracker domain.
 		trackerHandler := tracker.NewHandler(tracker.NewService(pool))
 		trackerHandler.RegisterRoutes(r)
+
+		// profile-persistence: Profile read/edit/undo domain.
+		profileHandler := profile.NewHandler(profile.NewService(pool))
+		profileHandler.RegisterRoutes(r)
 
 		// gmail-job-ingestion PR2: Email ingest trigger domain.
 		emailIngestHandler := emailingest.NewHandler(emailingest.NewService(pool))

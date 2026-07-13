@@ -30,12 +30,14 @@ test-rls:
 	docker compose exec -T postgres psql -U careerops -d careerops -f /docker-entrypoint-initdb.d/002_ingest_cv.sql 2>/dev/null || true
 	docker compose exec -T postgres psql -U careerops -d careerops -f /docker-entrypoint-initdb.d/003_rls_nullif.sql 2>/dev/null || true
 	docker compose exec -T postgres psql -U careerops -d careerops -f /docker-entrypoint-initdb.d/006_gmail_ingestion.sql 2>/dev/null || true
+	docker compose exec -T postgres psql -U careerops -d careerops -f /docker-entrypoint-initdb.d/007_profile_persistence.sql 2>/dev/null || true
 	docker compose exec -T postgres psql -U careerops -d careerops -f /docker-entrypoint-initdb.d/008_article_digests.sql 2>/dev/null || true
 	docker compose exec -T postgres psql -U careerops -d careerops -c "CREATE EXTENSION IF NOT EXISTS pgtap;" 2>/dev/null || true
 	docker compose exec -T -e PGPASSWORD=app_pw postgres pg_prove -U app_user -d careerops /db/tests/rls_test.sql
 	docker compose exec -T -e PGPASSWORD=app_pw postgres pg_prove -U app_user -d careerops /db/tests/cv_ingestions_rls.test.sql
 	docker compose exec -T -e PGPASSWORD=app_pw postgres pg_prove -U app_user -d careerops /db/tests/nullif_guc.test.sql
 	docker compose exec -T -e PGPASSWORD=app_pw postgres pg_prove -U app_user -d careerops /db/tests/gmail_ingestion_rls.test.sql
+	docker compose exec -T -e PGPASSWORD=app_pw postgres pg_prove -U app_user -d careerops /db/tests/profile_edits_rls.test.sql
 	docker compose exec -T -e PGPASSWORD=app_pw postgres pg_prove -U app_user -d careerops /db/tests/article_digests_rls.test.sql
 	docker compose stop postgres
 
