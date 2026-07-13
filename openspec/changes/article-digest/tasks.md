@@ -87,7 +87,7 @@ surface area scales with layer count, not novelty).
 
 ## Phase 6: Cross-cutting Verification
 
-- [ ] T-313 Run `make test-all`; confirm Go/worker/web suites — including every test added in T-296..T-312 — pass together, and that no other caller of `worker/lib/prompt.mjs`'s `system` array output broke now that it can be length-2 or length-3 depending on the user's digest count.
+- [x] T-313 Run `make test-all`; confirm Go/worker/web suites — including every test added in T-296..T-312 — pass together, and that no other caller of `worker/lib/prompt.mjs`'s `system` array output broke now that it can be length-2 or length-3 depending on the user's digest count.
 
 ## Dependencies Between Slices
 
