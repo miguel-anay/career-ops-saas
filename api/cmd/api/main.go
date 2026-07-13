@@ -16,6 +16,7 @@ import (
 	"github.com/miguel-anay/career-ops-saas/api/internal/companies"
 	"github.com/miguel-anay/career-ops-saas/api/internal/config"
 	"github.com/miguel-anay/career-ops-saas/api/internal/cv"
+	"github.com/miguel-anay/career-ops-saas/api/internal/digest"
 	"github.com/miguel-anay/career-ops-saas/api/internal/emailingest"
 	"github.com/miguel-anay/career-ops-saas/api/internal/evaluate"
 	"github.com/miguel-anay/career-ops-saas/api/internal/jobs"
@@ -129,6 +130,10 @@ func main() {
 		// gmail-job-ingestion PR2: Email ingest trigger domain.
 		emailIngestHandler := emailingest.NewHandler(emailingest.NewService(pool))
 		emailIngestHandler.RegisterRoutes(r)
+
+		// article-digest: per-project proof-point CRUD domain.
+		digestHandler := digest.NewHandler(digest.NewService(pool))
+		digestHandler.RegisterRoutes(r)
 	})
 
 	// 8. WebSocket hub + listener (T-39..T-43).
