@@ -36,16 +36,16 @@ export default function PerfilPage() {
   }, [loadProfile])
 
   if (isLoading) {
-    return <p className="p-4 text-sm text-muted-foreground">Loading...</p>
+    return <p className="container mx-auto p-6 text-sm text-muted-foreground">Loading...</p>
   }
 
   if (!data) {
-    return <p className="p-4 text-sm text-muted-foreground">Failed to load profile.</p>
+    return <p className="container mx-auto p-6 text-sm text-muted-foreground">Failed to load profile.</p>
   }
 
   return (
-    <div className="space-y-6 p-4">
-      <h1 className="text-lg font-semibold">Perfil</h1>
+    <div className="container mx-auto p-6 space-y-6 max-w-2xl">
+      <h1 className="text-2xl font-bold">Perfil</h1>
       <CvMarkdownView cvMarkdown={data.cv_markdown} />
       <ProfileEditForm profile={data.profile} onSaved={loadProfile} />
       <ManualEditsList edits={data.edits} onUndone={loadProfile} />

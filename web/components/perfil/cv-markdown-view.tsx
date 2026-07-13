@@ -10,7 +10,7 @@ export function CvMarkdownView({ cvMarkdown }: CvMarkdownViewProps) {
     <div className="rounded-md border p-4">
       <h2 className="mb-2 text-sm font-medium text-muted-foreground">CV</h2>
       {cvMarkdown ? (
-        <pre className="whitespace-pre-wrap text-sm">{cvMarkdown}</pre>
+        <pre className="whitespace-pre-wrap break-words text-sm">{cvMarkdown}</pre>
       ) : (
         <p className="text-sm text-muted-foreground">No CV ingested yet.</p>
       )}
