@@ -206,6 +206,14 @@ type Application struct {
 	UpdatedAt time.Time       `json:"updated_at"`
 }
 
+type ArticleDigest struct {
+	ID        uuid.UUID `json:"id"`
+	UserID    uuid.UUID `json:"user_id"`
+	Title     string    `json:"title"`
+	ContentMd string    `json:"content_md"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type CompaniesCatalog struct {
 	ID         uuid.UUID      `json:"id"`
 	Name       string         `json:"name"`

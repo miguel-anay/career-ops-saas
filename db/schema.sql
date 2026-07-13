@@ -201,3 +201,15 @@ CREATE TABLE profile_edits (
   resolved_at timestamptz
 );
 CREATE INDEX idx_profile_edits_user ON profile_edits(user_id, created_at DESC);
+
+-- article_digests (article-digest): per-project proof-point entries, an
+-- additive list (no is_master, unlike cvs). Read at evaluation time as a
+-- third cached prompt block (worker/lib/prompt.mjs).
+CREATE TABLE article_digests (
+  id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    uuid        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title      text        NOT NULL,
+  content_md text        NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_article_digests_user ON article_digests(user_id, created_at DESC);

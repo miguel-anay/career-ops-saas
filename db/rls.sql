@@ -21,6 +21,7 @@ ALTER TABLE usage             ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cv_ingestions     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE email_ingest_runs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE profile_edits     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE article_digests   ENABLE ROW LEVEL SECURITY;
 
 -- Force RLS even for the table owner role (app_user)
 ALTER TABLE users             FORCE ROW LEVEL SECURITY;
@@ -34,6 +35,7 @@ ALTER TABLE usage             FORCE ROW LEVEL SECURITY;
 ALTER TABLE cv_ingestions     FORCE ROW LEVEL SECURITY;
 ALTER TABLE email_ingest_runs FORCE ROW LEVEL SECURITY;
 ALTER TABLE profile_edits     FORCE ROW LEVEL SECURITY;
+ALTER TABLE article_digests   FORCE ROW LEVEL SECURITY;
 
 -- ---------------------------------------------------------------------------
 -- Tenant policies
@@ -80,5 +82,9 @@ CREATE POLICY tenant_email_ingest_runs ON email_ingest_runs
   WITH CHECK (user_id = NULLIF(current_setting('app.current_user_id', true), '')::uuid);
 
 CREATE POLICY tenant_profile_edits ON profile_edits
+  USING (user_id = NULLIF(current_setting('app.current_user_id', true), '')::uuid)
+  WITH CHECK (user_id = NULLIF(current_setting('app.current_user_id', true), '')::uuid);
+
+CREATE POLICY tenant_article_digests ON article_digests
   USING (user_id = NULLIF(current_setting('app.current_user_id', true), '')::uuid)
   WITH CHECK (user_id = NULLIF(current_setting('app.current_user_id', true), '')::uuid);
