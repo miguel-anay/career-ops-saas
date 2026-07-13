@@ -202,6 +202,42 @@ The rewritten `worker/tests/jobs/evaluate.test.mjs` MUST verify behavior by asse
 - WHEN `evaluate-job` builds the Anthropic prompt for that user
 - THEN the prompt's profile data reflects `"Staff Engineer"`, not `"Backend Engineer"`
 
+### Requirement R8: A third cached system block carries the user's article digests, bounded and ordered newest-first
+
+`buildEvaluationPrompt` MUST append a third `system[]` entry (after the existing static-prompt and CV+profile blocks), built from the requesting user's `article_digests` ordered `created_at DESC`, capped at **N=20 entries** and an **overall ~24,000-character ceiling** on the concatenated block text, with the same `cache_control: { type: 'ephemeral' }` treatment as the existing two blocks. Rows beyond the cap (by count or by running total length) MUST NOT be included; the newest entries always win the cap over older ones.
+
+#### Scenario: User has fewer than 20 entries, all under the character ceiling
+
+- GIVEN a user with 5 `article_digests` rows totaling well under 24,000 characters
+- WHEN `buildEvaluationPrompt` runs for that user
+- THEN the third system block includes all 5 entries, newest-first
+- AND the block carries `cache_control: { type: 'ephemeral' }`
+
+#### Scenario: User has more than 20 entries
+
+- GIVEN a user with 30 `article_digests` rows
+- WHEN `buildEvaluationPrompt` runs for that user
+- THEN the third system block includes at most the 20 most recent entries
+- AND the 10 oldest entries are excluded
+
+#### Scenario: Concatenated entries exceed the character ceiling before reaching 20
+
+- GIVEN a user with entries whose combined `content_md` length exceeds 24,000 characters before all 20 most-recent entries are included
+- WHEN `buildEvaluationPrompt` runs for that user
+- THEN the block stops including further (older) entries once the ceiling is reached, keeping the newest entries that fit
+- AND the total block text does not exceed the ~24,000-character ceiling
+
+### Requirement R8-Extended: The digest block is omitted entirely when the user has zero entries
+
+When the requesting user has no `article_digests` rows, `buildEvaluationPrompt` MUST NOT add a third `system[]` entry at all — not an empty block, not a block with a header and no content. The resulting `system[]` array MUST have exactly the same two entries as before this requirement.
+
+#### Scenario: User has zero digest entries
+
+- GIVEN a user with no rows in `article_digests`
+- WHEN `buildEvaluationPrompt` runs for that user
+- THEN the returned `system[]` array has exactly 2 entries (static prompt + CV/profile block)
+- AND no third entry — empty, header-only, or otherwise — is present
+
 ## Architectural Shape
 
 The evaluate-job handler is implemented as:
