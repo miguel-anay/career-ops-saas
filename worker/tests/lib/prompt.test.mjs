@@ -235,3 +235,82 @@ describe('buildEvaluationPrompt', () => {
     expect(mockTenantQuery.mock.calls[1][0]).toBe(userId)
   })
 })
+
+describe('buildEvaluationPrompt — article digest block (3rd system entry)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  function mockUserAndJob() {
+    mockTenantQuery
+      .mockResolvedValueOnce({ rows: [{ cv_markdown: '# CV', profile_json: '{}' }] })
+      .mockResolvedValueOnce({
+        rows: [{ scraped_content: 'JD', title: 'Eng', company: 'Corp', url: 'https://c.com/j' }],
+      })
+  }
+
+  it('omits the third block entirely when the user has zero digests', async () => {
+    mockUserAndJob()
+    mockTenantQuery.mockResolvedValueOnce({ rows: [] })
+
+    const result = await buildEvaluationPrompt('uid', 'jid', { tenantQuery: mockTenantQuery })
+
+    expect(result.system).toHaveLength(2)
+  })
+
+  it('includes entries under both caps, newest-first, with an ephemeral third block', async () => {
+    mockUserAndJob()
+    mockTenantQuery.mockResolvedValueOnce({
+      rows: [
+        { title: 'Newest Project', content_md: 'Recent proof point.' },
+        { title: 'Older Project', content_md: 'Older proof point.' },
+      ],
+    })
+
+    const result = await buildEvaluationPrompt('uid', 'jid', { tenantQuery: mockTenantQuery })
+
+    expect(result.system).toHaveLength(3)
+    const digestBlock = result.system[2]
+    expect(digestBlock.type).toBe('text')
+    expect(digestBlock.cache_control).toEqual({ type: 'ephemeral' })
+
+    const newestIndex = digestBlock.text.indexOf('Newest Project')
+    const olderIndex = digestBlock.text.indexOf('Older Project')
+    expect(newestIndex).toBeGreaterThanOrEqual(0)
+    expect(olderIndex).toBeGreaterThan(newestIndex)
+  })
+
+  it('truncates a single entry over 4000 chars with a "…[truncated]" marker', async () => {
+    mockUserAndJob()
+    const longContent = 'x'.repeat(5000)
+    mockTenantQuery.mockResolvedValueOnce({
+      rows: [{ title: 'Huge Entry', content_md: longContent }],
+    })
+
+    const result = await buildEvaluationPrompt('uid', 'jid', { tenantQuery: mockTenantQuery })
+
+    const digestBlock = result.system[2].text
+    expect(digestBlock).toContain('…[truncated]')
+    expect(digestBlock).toContain('x'.repeat(4000))
+    expect(digestBlock).not.toContain('x'.repeat(4001))
+  })
+
+  it('drops the whole entry (and every older one) once the running total would exceed 24000 chars', async () => {
+    mockUserAndJob()
+    // Each entry (header + 4000-char capped body) renders to ~4012 chars.
+    // 6 entries * ~4012 > 24000, so the 6th (oldest) entry must be dropped whole.
+    const rows = Array.from({ length: 6 }, (_, i) => ({
+      title: `Entry ${i}`,
+      content_md: 'y'.repeat(4000),
+    }))
+    mockTenantQuery.mockResolvedValueOnce({ rows })
+
+    const result = await buildEvaluationPrompt('uid', 'jid', { tenantQuery: mockTenantQuery })
+
+    const digestBlock = result.system[2].text
+    expect(digestBlock).toContain('Entry 0')
+    expect(digestBlock).toContain('Entry 4')
+    expect(digestBlock).not.toContain('Entry 5')
+    expect(digestBlock.length).toBeLessThanOrEqual(24000 + 100)
+  })
+})
