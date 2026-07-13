@@ -57,7 +57,7 @@ func TestApplyOverride_RejectsFieldPathOutsideAllowlist(t *testing.T) {
 }
 
 func TestAllowedFieldPaths_MatchesDesignAllowlist(t *testing.T) {
-	for _, fp := range []string{"target_roles", "salary_target", "narrative", "candidate", "deal_breakers", "comp_targets"} {
+	for _, fp := range []string{"target_roles", "salary_target", "narrative", "candidate", "deal_breakers", "comp_targets", "scoring_rules"} {
 		assert.True(t, isAllowedFieldPath(fp), "field path %q must be allowlisted", fp)
 	}
 	assert.False(t, isAllowedFieldPath("not_a_real_field"))

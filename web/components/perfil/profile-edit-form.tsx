@@ -16,6 +16,7 @@ const FIELD_PATHS = [
   'candidate',
   'deal_breakers',
   'comp_targets',
+  'scoring_rules',
 ] as const
 
 type ProfileEditFormProps = {

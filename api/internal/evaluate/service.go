@@ -32,7 +32,48 @@ var ErrCVMissing = errors.New("cv missing")
 // ingestion source (manual, email, or ATS scan).
 var ErrJobContentMissing = errors.New("job content missing")
 
+// ErrStalePosting is returned when the job's received_at exceeds the user's
+// own scoring_rules.max_posting_age_days (a per-user opt-in gate — a no-op
+// when that field is unset or the job's received_at is unknown).
+var ErrStalePosting = errors.New("stale posting")
+
 const freePlanEvalLimit = 5
+
+// scoringRules is the subset of the profile_overrides/profile_json
+// "scoring_rules" key this guard cares about. boost/penalize are consumed
+// narratively by the worker's evaluation prompt, not here.
+type scoringRules struct {
+	MaxPostingAgeDays *int `json:"max_posting_age_days"`
+}
+
+// extractScoringRules reads the effective "scoring_rules" key (override wins
+// over the CV-derived value, mirroring profile.currentKey's precedence —
+// duplicated here rather than imported, since evaluate/profile are separate
+// domain packages per this project's hexagonal convention). Malformed or
+// absent input yields nil, never an error — this guard fails open.
+func extractScoringRules(base, overrides []byte) *scoringRules {
+	var raw json.RawMessage
+	if len(overrides) > 0 {
+		var ov map[string]json.RawMessage
+		if err := json.Unmarshal(overrides, &ov); err == nil {
+			raw = ov["scoring_rules"]
+		}
+	}
+	if raw == nil && len(base) > 0 {
+		var b map[string]json.RawMessage
+		if err := json.Unmarshal(base, &b); err == nil {
+			raw = b["scoring_rules"]
+		}
+	}
+	if raw == nil {
+		return nil
+	}
+	var sr scoringRules
+	if err := json.Unmarshal(raw, &sr); err != nil {
+		return nil
+	}
+	return &sr
+}
 
 // Service contains business logic for the evaluate domain.
 type Service struct {
@@ -86,6 +127,16 @@ func (s *Service) EnqueueEvaluation(ctx context.Context, userID, jobID uuid.UUID
 		}
 		if isBlank(job.ScrapedContent) {
 			return ErrJobContentMissing
+		}
+
+		// 2b. Guard posting age against the user's own opt-in scoring_rules
+		// (a no-op when unset or when the posting date is unknown — this
+		// never blocks evaluation unless the user explicitly configured it).
+		if sr := extractScoringRules(user.ProfileJson, user.ProfileOverrides); sr != nil && sr.MaxPostingAgeDays != nil && job.ReceivedAt.Valid {
+			ageDays := int(time.Since(job.ReceivedAt.Time).Hours() / 24)
+			if ageDays > *sr.MaxPostingAgeDays {
+				return ErrStalePosting
+			}
 		}
 
 		// 3. Check usage limit for free plan.

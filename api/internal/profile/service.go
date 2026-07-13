@@ -40,6 +40,7 @@ var allowedFieldPaths = map[string]bool{
 	"candidate":     true,
 	"deal_breakers": true,
 	"comp_targets":  true,
+	"scoring_rules": true,
 }
 
 func isAllowedFieldPath(fieldPath string) bool {

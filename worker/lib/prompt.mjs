@@ -164,7 +164,8 @@ Write the FULL evaluation in Spanish (es-AR). Every block, score description, an
 Additional guidance:
 - Map the candidate's relevant CV experience to STAR-format achievements (Situation, Task, Action, Result) the candidate could use in an interview for this role.
 - Include concrete negotiation guidance (e.g. target compensation range, leverage points) informed by the JD and the candidate's profile.
-- If a posting age is provided, factor it into Block G's legitimacy assessment (a very old, unrefreshed posting is a legitimacy signal).`
+- If a posting age is provided, factor it into Block G's legitimacy assessment (a very old, unrefreshed posting is a legitimacy signal).
+- If the candidate profile includes a \`scoring_rules\` field with \`boost\`/\`penalize\` conditions, apply them narratively when scoring the relevant block — e.g. a matching \`boost\` condition should visibly raise that block's score with an explicit note on why, and a matching \`penalize\` condition should visibly lower it. Do not invent a separate numeric bonus outside the block scores; fold the adjustment into the block's own score and reasoning.`
 
   const cvAndProfileBlock = `## Candidate Profile
 
