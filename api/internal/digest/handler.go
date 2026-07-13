@@ -74,7 +74,11 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 	digestRecord, err := h.svc.CreateDigest(r.Context(), userID, body.Title, body.ContentMd)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error(), "invalid_request")
+		if errors.Is(err, ErrValidation) {
+			writeError(w, http.StatusBadRequest, err.Error(), "invalid_request")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to create digest", "internal_error")
 		return
 	}
 

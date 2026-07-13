@@ -12,13 +12,16 @@ import (
 // T-302: validation must short-circuit BEFORE platform.WithTenantTx ever
 // touches the pool. A nil pool proves no DB call was attempted — a real
 // pool dereference inside WithTenantTx would panic instead of returning
-// a clean validation error.
+// a clean validation error. Both cases must be errors.Is-detectable as
+// ErrValidation so the handler can map them to 400 and everything else to
+// 500 (see handler_test.go's TestCreate_NonValidationErrorBubblesAs500).
 
 func TestCreateDigest_EmptyTitle(t *testing.T) {
 	svc := NewService(nil)
 	_, err := svc.CreateDigest(context.Background(), uuid.New(), "", "some content")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "title")
+	assert.ErrorIs(t, err, ErrValidation)
 }
 
 func TestCreateDigest_EmptyContentMd(t *testing.T) {
@@ -26,4 +29,5 @@ func TestCreateDigest_EmptyContentMd(t *testing.T) {
 	_, err := svc.CreateDigest(context.Background(), uuid.New(), "My Project", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "content_md")
+	assert.ErrorIs(t, err, ErrValidation)
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -132,7 +133,7 @@ func TestCreate_EmptyTitleBubblesAs400(t *testing.T) {
 
 	userID := uuid.New()
 	svc.On("CreateDigest", mock.Anything, userID, "", "# hero metrics").
-		Return(nil, assert.AnError)
+		Return(nil, fmt.Errorf("title is required: %w", digest.ErrValidation))
 
 	body, _ := json.Marshal(map[string]string{"title": "", "content_md": "# hero metrics"})
 	req := httptest.NewRequest(http.MethodPost, "/api/article-digests", bytes.NewReader(body))
@@ -143,6 +144,30 @@ func TestCreate_EmptyTitleBubblesAs400(t *testing.T) {
 	h.Create(rec, req)
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	svc.AssertExpectations(t)
+}
+
+// Regression guard: a non-validation error (e.g. a DB failure inside
+// CreateDigest's WithTenantTx) must map to 500, not 400 — Create previously
+// mapped every error from the service to 400 via err.Error(), which would
+// have misreported a genuine infra failure as a client input problem.
+func TestCreate_NonValidationErrorBubblesAs500(t *testing.T) {
+	svc := &MockService{}
+	h := digest.NewHandler(svc)
+
+	userID := uuid.New()
+	svc.On("CreateDigest", mock.Anything, userID, "Title", "content").
+		Return(nil, assert.AnError)
+
+	body, _ := json.Marshal(map[string]string{"title": "Title", "content_md": "content"})
+	req := httptest.NewRequest(http.MethodPost, "/api/article-digests", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(middleware.SetUserID(req.Context(), userID))
+	rec := httptest.NewRecorder()
+
+	h.Create(rec, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	svc.AssertExpectations(t)
 }
 

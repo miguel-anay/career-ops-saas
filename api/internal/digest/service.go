@@ -16,6 +16,13 @@ import (
 // (including the RLS-invisible cross-tenant case — see DeleteDigest).
 var ErrNotFound = errors.New("not found")
 
+// ErrValidation is returned when CreateDigest's input fails validation.
+// Wrapped with a specific message via fmt.Errorf("...: %w", ErrValidation)
+// so the handler can distinguish a 400 (bad input) from a 500 (everything
+// else, e.g. a DB failure) via errors.Is — the same idiom every other
+// domain package in this repo uses (see cv.ErrNotFound / cv.ErrNoPDFPath).
+var ErrValidation = errors.New("validation failed")
+
 // Service contains business logic for the article-digest domain.
 type Service struct {
 	pool *pgxpool.Pool
@@ -49,10 +56,10 @@ func (s *Service) ListDigests(ctx context.Context, userID uuid.UUID) ([]db.Artic
 // reaches the DB.
 func (s *Service) CreateDigest(ctx context.Context, userID uuid.UUID, title, contentMd string) (*db.ArticleDigest, error) {
 	if title == "" {
-		return nil, fmt.Errorf("title is required")
+		return nil, fmt.Errorf("title is required: %w", ErrValidation)
 	}
 	if contentMd == "" {
-		return nil, fmt.Errorf("content_md is required")
+		return nil, fmt.Errorf("content_md is required: %w", ErrValidation)
 	}
 
 	var digestRecord db.ArticleDigest
