@@ -410,21 +410,21 @@ page.
 
 ## Data Flow
 
-    ── Ingestion (merge) ──────────────────────────────────────────────
-    ingest-cv job ─ tenantQuery SELECT cv_markdown, profile_json  (existing)
-                  ─ buildIngestPrompt(raw_cv, existingCv)          (merge variant if existing)
-                  ─ Claude → parseIngestResponse (unchanged)
-                  ─ parse_error over good profile? ─ yes → mark 'failed', NO write
-                                                   ─ no  → UPDATE users SET cv_markdown, profile_json
+    -- Ingestion (merge) ──────────────────────────────────────────────
+    ingest-cv job - tenantQuery SELECT cv_markdown, profile_json  (existing)
+                  - buildIngestPrompt(raw_cv, existingCv)          (merge variant if existing)
+                  - Claude → parseIngestResponse (unchanged)
+                  - parse_error over good profile? - yes → mark 'failed', NO write
+                                                   - no  → UPDATE users SET cv_markdown, profile_json
                        (profile_overrides NEVER touched here)
 
-    ── Read / Edit (Go API) ───────────────────────────────────────────
-    GET  /api/me/profile ─ WithTenantTx GetUserProfile ─ mergeProfile ─ {cv, effective, edits}
-    PATCH /api/me/profile ─ WithTenantTx [ read old → SetProfileOverrideKey → InsertProfileEdit ]  (atomic)
-    POST /api/me/profile-edits/{id}/undo ─ WithTenantTx [ GetProfileEdit → DropProfileOverrideKey → MarkProfileEditUndone ]
+    -- Read / Edit (Go API) ───────────────────────────────────────────
+    GET  /api/me/profile - WithTenantTx GetUserProfile - mergeProfile - {cv, effective, edits}
+    PATCH /api/me/profile - WithTenantTx [ read old → SetProfileOverrideKey → InsertProfileEdit ]  (atomic)
+    POST /api/me/profile-edits/{id}/undo - WithTenantTx [ GetProfileEdit → DropProfileOverrideKey → MarkProfileEditUndone ]
 
-    ── Evaluation (consume) ───────────────────────────────────────────
-    evaluate-job ─ buildEvaluationPrompt ─ SELECT ...+profile_overrides ─ mergeProfile ─ injected JSON blob
+    -- Evaluation (consume) ───────────────────────────────────────────
+    evaluate-job - buildEvaluationPrompt - SELECT ...+profile_overrides - mergeProfile - injected JSON blob
 
 ## File Changes
 
