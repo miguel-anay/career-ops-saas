@@ -60,6 +60,8 @@ func (h *Handler) Evaluate(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusUnprocessableEntity, err.Error(), "cv_missing")
 		case errors.Is(err, ErrJobContentMissing):
 			writeError(w, http.StatusUnprocessableEntity, err.Error(), "job_content_missing")
+		case errors.Is(err, ErrStalePosting):
+			writeError(w, http.StatusUnprocessableEntity, err.Error(), "stale_posting")
 		default:
 			writeError(w, http.StatusInternalServerError, "failed to enqueue evaluation", "internal_error")
 		}
