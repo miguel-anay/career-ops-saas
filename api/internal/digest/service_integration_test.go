@@ -71,3 +71,21 @@ func TestDeleteDigest_Owner(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, stillExists, "A's own digest must be gone after the owner's delete")
 }
+
+// TestListDigests_EmptyReturnsEmptySliceNotNil proves issue #66: a user with
+// zero article_digests rows gets back a non-nil empty slice, not a nil one.
+// A nil slice serializes as JSON `null` (encoding/json), which crashed the
+// web page's `digests.map(...)` for any user who hadn't added a digest yet.
+func TestListDigests_EmptyReturnsEmptySliceNotNil(t *testing.T) {
+	ctx := context.Background()
+	h := rlsdb.New(ctx, t)
+
+	userA := h.SeedUser(ctx, t, "digest-itest-empty-a@test.invalid", "digest_itest_empty_google_a")
+
+	svc := digest.NewService(h.AppPool)
+
+	digests, err := svc.ListDigests(ctx, userA)
+	require.NoError(t, err)
+	require.NotNil(t, digests, "ListDigests must return a non-nil slice even with zero rows")
+	require.Empty(t, digests)
+}

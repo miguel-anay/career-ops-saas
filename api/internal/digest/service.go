@@ -36,13 +36,15 @@ func NewService(pool *pgxpool.Pool) *Service {
 // ListDigests returns all article_digests rows for the given user, newest
 // first.
 func (s *Service) ListDigests(ctx context.Context, userID uuid.UUID) ([]db.ArticleDigest, error) {
-	var digests []db.ArticleDigest
+	digests := []db.ArticleDigest{}
 	err := platform.WithTenantTx(ctx, s.pool, userID, func(q *db.Queries) error {
 		rows, err := q.ListDigestsByUser(ctx, userID)
 		if err != nil {
 			return err
 		}
-		digests = rows
+		if rows != nil {
+			digests = rows
+		}
 		return nil
 	})
 	if err != nil {
